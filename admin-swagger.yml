@@ -1,0 +1,389 @@
+openapi: 3.0.3
+info:
+  title: MDB Admin BFF API
+  description: >
+    Backend-for-Frontend (BFF) API for the Internal Admin Dashboard.
+    Orchestrates calls to User Gateway, Media Gateway, Crawler Service, and Notification Service.
+  version: 1.1.0
+  contact:
+    name: MDB Platform Team
+servers:
+  - url: http://localhost:3001/api/v1
+    description: Local Dev Environment
+
+# ---------------------------------------------------------
+# SECURITY: Keycloak Integration
+# ---------------------------------------------------------
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------
+  # DASHBOARD & ANALYTICS
+  # ---------------------------------------------------------
+  /dashboard/stats:
+    get:
+      summary: Get Global System Stats
+      description: Aggregates counts from User DB, Media DB, and Active Crawler Jobs.
+      tags:
+        - Dashboard
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStats'
+
+  # ---------------------------------------------------------
+  # USER MANAGEMENT (Via User-Data-Gateway)
+  # ---------------------------------------------------------
+  /users:
+    get:
+      summary: List all users (Paged)
+      tags:
+        - Users
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Filter by email or username
+      responses:
+        '200':
+          description: Paged list of users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      summary: Get user details
+      tags:
+        - Users
+      responses:
+        '200':
+          description: User details found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    patch:
+      summary: Ban or Unban a User
+      description: Updates the user status in the User Gateway and kills active sessions in Keycloak.
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [ACTIVE, BANNED, SUSPENDED]
+                  description: The new status to apply.
+                reason:
+                  type: string
+                  description: Internal note for why this action was taken.
+      responses:
+        '200':
+          description: User status updated
+
+  # ---------------------------------------------------------
+  # MEDIA MANAGEMENT (Via Media-Data-Gateway)
+  # ---------------------------------------------------------
+  /media:
+    get:
+      summary: Browse Media Catalog
+      tags:
+        - Media
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [DRAFT, PUBLISHED, FLAGGED]
+      responses:
+        '200':
+          description: List of media items
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MediaItem'
+    post:
+      summary: Create new Media Item
+      tags:
+        - Media
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaItemInput'
+      responses:
+        '201':
+          description: Created successfully
+
+  /media/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      summary: Get media details
+      tags:
+        - Media
+      responses:
+        '200':
+          description: Media details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaItem'
+    put:
+      summary: Update Media Metadata
+      tags:
+        - Media
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaItemInput'
+      responses:
+        '200':
+          description: Updated successfully
+
+  # ---------------------------------------------------------
+  # CRAWLER CONTROL (Via Crawler-Service)
+  # ---------------------------------------------------------
+  /crawler/jobs:
+    get:
+      summary: Get Crawler Job History
+      tags:
+        - Crawler
+      responses:
+        '200':
+          description: List of recent jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CrawlerJob'
+    post:
+      summary: Trigger a Manual Crawl
+      tags:
+        - Crawler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetUrl:
+                  type: string
+                  example: "https://source-site.com/movies"
+                depth:
+                  type: integer
+                  default: 1
+      responses:
+        '202':
+          description: Job Accepted (Processing in background)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId:
+                    type: string
+                  status:
+                    type: string
+                    example: "QUEUED"
+
+  # ---------------------------------------------------------
+  # NOTIFICATIONS (Via Notification-Service)
+  # ---------------------------------------------------------
+  /notifications/broadcast:
+    post:
+      summary: Send a System-Wide Notification
+      description: Pushes a message to the `system-alerts` Kafka topic, which Notification Service picks up.
+      tags:
+        - Notifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - message
+                - channel
+              properties:
+                title:
+                  type: string
+                  example: "Scheduled Maintenance"
+                message:
+                  type: string
+                  example: "MDB will be down for 1 hour tonight."
+                channel:
+                  type: string
+                  enum: [EMAIL, PUSH, IN_APP]
+                targetGroup:
+                  type: string
+                  enum: [ALL_USERS, PREMIUM_USERS, ADMINS]
+      responses:
+        '202':
+          description: Broadcast queued successfully
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Enter Keycloak Access Token
+
+  parameters:
+    PageParam:
+      in: query
+      name: page
+      schema:
+        type: integer
+        default: 1
+    LimitParam:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        default: 20
+    ResourceId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    # --- SHARED ---
+    PagedResponse:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalDocs:
+          type: integer
+        totalPages:
+          type: integer
+
+    # --- DASHBOARD ---
+    DashboardStats:
+      type: object
+      properties:
+        totalUsers:
+          type: integer
+        activeUsers24h:
+          type: integer
+        totalMovies:
+          type: integer
+        systemHealth:
+          type: string
+          enum: [HEALTHY, DEGRADED, DOWN]
+        pendingCrawlJobs:
+          type: integer
+
+    # --- USER ---
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        keycloakId:
+          type: string
+          description: The ID of the user in Identity Provider
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [ACTIVE, BANNED, SUSPENDED]
+        lastLogin:
+          type: string
+          format: date-time
+
+    # --- MEDIA ---
+    MediaItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        posterUrl:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED, FLAGGED]
+        releaseYear:
+          type: integer
+
+    MediaItemInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        posterUrl:
+          type: string
+        releaseYear:
+          type: integer
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED]
+
+    # --- CRAWLER ---
+    CrawlerJob:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        startTime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [RUNNING, COMPLETED, FAILED]
+        itemsFound:
+          type: integer
