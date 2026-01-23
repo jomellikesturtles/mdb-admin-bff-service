@@ -1,5 +1,8 @@
 package com.mdb.adminbff.config;
 
+import com.mdb.adminbff.dto.User;
+import com.mdb.adminbff.service.TokenBlacklistService;
+import com.mdb.adminbff.service.UserService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -7,6 +10,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -17,11 +21,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Component
+@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final TokenBlacklistService tokenBlacklistService;
+    private final UserService userService;
 
     @Value("${jwt.secret}")
     private String secret;
@@ -37,6 +47,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String token = header.substring(7);
+
+        if (tokenBlacklistService.isTokenBlacklisted(token)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         try {
             SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
             Claims claims = Jwts.parser()
@@ -46,13 +62,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     .getPayload();
 
             String username = claims.getSubject();
+            
             if (username != null) {
-                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                        username, null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
-                SecurityContextHolder.getContext().setAuthentication(auth);
+                Optional<User> userOptional = userService.findByUsername(username);
+                
+                if (userOptional.isPresent()) {
+                    User user = userOptional.get();
+                    List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
+                            .map(SimpleGrantedAuthority::new)
+                            .collect(Collectors.toList());
+
+                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                            user, null, authorities);
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                }
             }
         } catch (Exception e) {
-            // Token invalid
+            // Token invalid or expired
+            SecurityContextHolder.clearContext();
         }
 
         filterChain.doFilter(request, response);

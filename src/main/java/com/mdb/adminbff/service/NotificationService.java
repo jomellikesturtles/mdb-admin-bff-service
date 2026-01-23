@@ -1,6 +1,7 @@
 package com.mdb.adminbff.service;
 
 import com.mdb.adminbff.dto.NotificationRequest;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -13,6 +14,7 @@ public class NotificationService {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
 
+    @RateLimiter(name = "notifications")
     public void sendNotification(NotificationRequest request) {
         // In a real app, we'd serialize the object. For simplicity, we send a string.
         String message = String.format("Title: %s, Message: %s, Channel: %s", 

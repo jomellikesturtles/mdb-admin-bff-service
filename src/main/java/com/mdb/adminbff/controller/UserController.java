@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -19,6 +20,12 @@ import java.util.UUID;
 public class UserController {
 
     private final UserService userService;
+
+    @Operation(summary = "Get current authenticated user")
+    @GetMapping("/me")
+    public ResponseEntity<User> getCurrentUser(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(user);
+    }
 
     @Operation(summary = "List all users (Paged)")
     @GetMapping

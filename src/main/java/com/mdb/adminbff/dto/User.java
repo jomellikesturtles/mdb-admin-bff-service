@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -18,5 +19,6 @@ public class User {
     private String username;
     private String email;
     private String status; // ACTIVE, BANNED, SUSPENDED
+    private List<String> roles;
     private LocalDateTime lastLogin;
 }
