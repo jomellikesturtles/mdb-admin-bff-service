@@ -5,12 +5,13 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 @Service
 public class DashboardService {
 
     @Async
-    public CompletableFuture<DashboardStats> getDashboardStats() {
+    public DashboardStats getDashboardStats() {
         CompletableFuture<Integer> userCountFuture = CompletableFuture.supplyAsync(() -> {
             // Simulate call to User Service
             simulateLatency();
@@ -35,7 +36,7 @@ public class DashboardService {
             return 5;
         });
 
-        return CompletableFuture.allOf(userCountFuture, activeUsersFuture, movieCountFuture, pendingJobsFuture)
+        CompletableFuture<DashboardStats> futures =  CompletableFuture.allOf(userCountFuture, activeUsersFuture, movieCountFuture, pendingJobsFuture)
                 .thenApply(v -> DashboardStats.builder()
                         .totalUsers(userCountFuture.join())
                         .activeUsers24h(activeUsersFuture.join())
@@ -43,11 +44,21 @@ public class DashboardService {
                         .pendingCrawlJobs(pendingJobsFuture.join())
                         .systemHealth("HEALTHY")
                         .build());
-    }
+		try {
+			return futures.get();
+		} catch (InterruptedException e) {
+			throw new RuntimeException(e);
+		} catch (ExecutionException e) {
+			throw new RuntimeException(e);
+		}
+	}
 
     private void simulateLatency() {
+        int min = 30;
+        int max = 8000;
+        System.out.println("SLEEP LATENCY" + (int) (Math.random() * (max - min) + min));
         try {
-            Thread.sleep(500);
+            Thread.sleep((int) (int) (Math.random() * (max - min) + min));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

@@ -1,48 +1,57 @@
 package com.mdb.adminbff.exception;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.validation.FieldError;
-import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Objects;
 
-@RestControllerAdvice
-public class GlobalExceptionHandler {
+@ControllerAdvice
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new HashMap<>();
-        ex.getBindingResult().getAllErrors().forEach((error) -> {
-            String fieldName = ((FieldError) error).getField();
-            String errorMessage = error.getDefaultMessage();
-            errors.put(fieldName, errorMessage);
-        });
-        return ResponseEntity.badRequest().body(errors);
-    }
+	@ExceptionHandler({ApiException.class})
+	protected ResponseEntity<Object> handleApiException(ApiException ex) {
+		return buildErrorResponseEntity(ex);
+	}
 
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<String> handleAccessDeniedException(AccessDeniedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access Denied: " + ex.getMessage());
-    }
+	private ResponseEntity<Object> buildErrorResponseEntity(ApiException ex) {
+		ErrorResponse errorResponse = new ErrorResponse();
+		HttpStatus httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
 
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<String> handleAuthenticationException(AuthenticationException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication Failed: " + ex.getMessage());
-    }
+		if (ex.getApiError() instanceof BaseApiError) {
+			BaseApiError apiError = (BaseApiError) ex.getApiError();
+			if (Objects.isNull(apiError.getErrorCode())) {
+				errorResponse.setCode(apiError.getDynamicCode());
+				errorResponse.setMessage(apiError.getDynamicMessage());
+				errorResponse.setId(apiError.getId());
+				httpStatus = apiError.getStatus();
+			} else {
+				errorResponse.setCode(apiError.getErrorCode().getCode());
+				errorResponse.setMessage(apiError.getErrorCode().getMessage());
+				errorResponse.setId(apiError.getId());
+				httpStatus = apiError.getErrorCode().getHttpStatus();
+			}
+		} else {
+			errorResponse.setCode(ApiErrorCode.BAD_REQUEST_GENERIC.getCode());
+			errorResponse.setMessage(ApiErrorCode.BAD_REQUEST_GENERIC.getMessage());
+		}
+		return new ResponseEntity<>(errorResponse, httpStatus);
+	}
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<String> handleIllegalArgumentException(IllegalArgumentException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
-    }
+	@Override
+	protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex, HttpHeaders headers, HttpStatusCode status, WebRequest requet) {
+		ErrorResponse errorResponse = new ErrorResponse();
+		HttpStatus httpStatus = HttpStatus.BAD_REQUEST;
+		errorResponse.setCode(ApiErrorCode.BAD_REQUEST_GENERIC.getCode());
+		errorResponse.setMessage(ApiErrorCode.BAD_REQUEST_GENERIC.getMessage());
 
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> handleGlobalException(Exception ex) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred: " + ex.getMessage());
-    }
+		return new ResponseEntity<>(errorResponse, httpStatus);
+	}
+
 }

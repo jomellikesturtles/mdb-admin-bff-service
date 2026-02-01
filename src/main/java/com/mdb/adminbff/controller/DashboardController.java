@@ -21,7 +21,7 @@ public class DashboardController {
 
     @Operation(summary = "Get Global System Stats")
     @GetMapping("/stats")
-    public CompletableFuture<DashboardStats> getStats() {
+    public DashboardStats getStats() {
         return dashboardService.getDashboardStats();
     }
 }
