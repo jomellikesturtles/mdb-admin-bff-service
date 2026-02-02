@@ -258,6 +258,72 @@ paths:
         '202':
           description: Broadcast queued successfully
 
+  # ---------------------------------------------------------
+  # SYSTEM CONFIGURATION
+  # ---------------------------------------------------------
+  /system/maintenance:
+    get:
+      summary: Get Maintenance Mode Status
+      tags:
+        - System Configuration
+      responses:
+        '200':
+          description: Current maintenance status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceConfig'
+    put:
+      summary: Update Maintenance Mode Status
+      tags:
+        - System Configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceConfig'
+      responses:
+        '200':
+          description: Status updated successfully
+
+  /system/features:
+    get:
+      summary: List all Feature Flags
+      tags:
+        - System Configuration
+      responses:
+        '200':
+          description: Map of feature flags
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: boolean
+
+  /system/features/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+        description: The feature flag key
+    put:
+      summary: Toggle a Feature Flag
+      tags:
+        - System Configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureFlagRequest'
+      responses:
+        '200':
+          description: Feature flag updated
+
 components:
   securitySchemes:
     bearerAuth:
@@ -387,3 +453,26 @@ components:
           enum: [RUNNING, COMPLETED, FAILED]
         itemsFound:
           type: integer
+
+    # --- SYSTEM CONFIG ---
+    MaintenanceConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        message:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        estimatedEndTime:
+          type: string
+          format: date-time
+
+    FeatureFlagRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        description:
+          type: string
