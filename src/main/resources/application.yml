@@ -3,6 +3,9 @@ server:
   servlet:
     context-path: /api/v1
 
+cors:
+  allowed-origins: http://localhost:5173,http://localhost:3000
+
 spring:
   application:
     name: mdb-admin-bff-service
