@@ -2,14 +2,19 @@ package com.mdb.adminbff.service;
 
 import com.mdb.adminbff.dto.PagedResponse;
 import com.mdb.adminbff.dto.User;
+import com.mdb.adminbff.entity.UserEntity;
+import com.mdb.adminbff.repository.UserRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -17,107 +22,103 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class UserService {
 
     private static final Logger logger = LoggerFactory.getLogger(UserService.class);
-    private static final List<User> MOCK_USERS = new ArrayList<>();
+    private final UserRepository userRepository;
 
-    static {
-        for (int i = 0; i < 50; i++) {
-            List<String> roles = new ArrayList<>();
-            roles.add("ROLE_USER");
-            if (i % 5 == 0) { // Every 5th user is an admin
-                roles.add("ROLE_ADMIN");
-            }
-            
-            MOCK_USERS.add(User.builder()
-                    .id(UUID.randomUUID())
-                    .keycloakId(UUID.randomUUID().toString())
-                    .username("user" + i)
-                    .email("user" + i + "@example.com")
-                    .status("ACTIVE")
-                    .roles(roles)
-                    .lastLogin(LocalDateTime.now().minusDays(i))
-                    .build());
-        }
-    }
-
-    @Cacheable(value = "users", key = "#page + '-' + #limit + '-' + #search")
-    @CircuitBreaker(name = "externalService", fallbackMethod = "fallbackGetUsers")
-    public PagedResponse<User> getUsers(int page, int limit, String search) {
+@Cacheable(value = "users", key = "#page + '-' + #limit + '-' + #search")
+@CircuitBreaker(name = "externalService", fallbackMethod = "fallbackGetUsers")
+@Transactional(readOnly = true)
+public PagedResponse<User> getUsers(int page, int limit, String search) {
         logger.debug("Fetching users. Page: {}, Limit: {}, Search: {}", page, limit, search);
-        simulateLatency();
         
-        List<User> filtered = MOCK_USERS.stream()
-                .filter(u -> search == null || u.getUsername().contains(search) || u.getEmail().contains(search))
+        PageRequest pageRequest = PageRequest.of(page - 1, limit);
+        Page<UserEntity> userPage;
+        
+        if (search != null && !search.isEmpty()) {
+            userPage = userRepository.findByUsernameContainingOrEmailContaining(search, search, pageRequest);
+        } else {
+            userPage = userRepository.findAll(pageRequest);
+        }
+
+        List<User> items = userPage.getContent().stream()
+                .map(this::mapToDto)
                 .collect(Collectors.toList());
 
-        int totalDocs = filtered.size();
-        int totalPages = (int) Math.ceil((double) totalDocs / limit);
-        int start = Math.min((page - 1) * limit, totalDocs);
-        int end = Math.min(start + limit, totalDocs);
-
-        List<User> pagedItems = filtered.subList(start, end);
-
-        logger.info("Fetched {} users out of {}", pagedItems.size(), totalDocs);
+        logger.info("Fetched {} users out of {}", items.size(), userPage.getTotalElements());
         return PagedResponse.<User>builder()
                 .page(page)
                 .limit(limit)
-                .totalDocs(totalDocs)
-                .totalPages(totalPages)
-                .items(pagedItems)
+                .totalDocs((int) userPage.getTotalElements())
+                .totalPages(userPage.getTotalPages())
+                .items(items)
                 .build();
     }
 
     @Cacheable(value = "user", key = "#id")
     public Optional<User> getUserById(UUID id) {
         logger.debug("Fetching user by ID: {}", id);
-        return MOCK_USERS.stream()
-                .filter(u -> u.getId().equals(id))
-                .findFirst();
+        return userRepository.findById(id).map(this::mapToDto);
     }
 
     public Optional<User> findByUsername(String username) {
         logger.debug("Fetching user by username: {}", username);
-        return MOCK_USERS.stream()
-                .filter(u -> u.getUsername().equals(username))
-                .findFirst();
+        return userRepository.findByUsername(username).map(this::mapToDto);
     }
 
-    public User saveUser(User user) {
-        logger.info("Saving user: {}", user.getUsername());
-        MOCK_USERS.add(user);
-        return user;
+    @Transactional
+    public User saveUser(User userDto) {
+        logger.info("Saving user: {}", userDto.getUsername());
+        UserEntity entity = mapToEntity(userDto);
+        UserEntity saved = userRepository.save(entity);
+        return mapToDto(saved);
     }
 
+    @Transactional
     @CacheEvict(value = {"user", "users"}, allEntries = true)
     public void banUser(UUID id, String status, String reason) {
         logger.warn("Banning user ID: {}. Status: {}. Reason: {}", id, status, reason);
-        MOCK_USERS.stream()
-                .filter(u -> u.getId().equals(id))
-                .findFirst()
-                .ifPresent(u -> {
-                    u.setStatus(status);
-                    logger.info("User {} status updated to {}", u.getUsername(), status);
-                });
+        userRepository.findById(id).ifPresent(u -> {
+            u.setStatus(status);
+            userRepository.save(u);
+            logger.info("User {} status updated to {}", u.getUsername(), status);
+        });
     }
 
     public PagedResponse<User> fallbackGetUsers(int page, int limit, String search, Throwable t) {
-        logger.error("Fallback for getUsers triggered. Error: {}", t.getMessage());
+        logger.error("Fallback for getUsers triggered. Error: {}", t.getMessage(), t);
         return PagedResponse.<User>builder()
                 .page(page)
                 .limit(limit)
                 .totalDocs(0)
                 .totalPages(0)
-                .items(List.of())
+                .items(new ArrayList<>())
                 .build();
     }
 
-    private void simulateLatency() {
-        try {
-            Thread.sleep(200);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    private User mapToDto(UserEntity entity) {
+        return User.builder()
+                .id(entity.getId())
+                .keycloakId(entity.getKeycloakId())
+                .username(entity.getUsername())
+                .email(entity.getEmail())
+                .status(entity.getStatus())
+                .roles(entity.getRoles() != null ? new ArrayList<>(entity.getRoles()) : new ArrayList<>())
+                .lastLogin(entity.getLastLogin())
+                .build();
+    }
+
+    private UserEntity mapToEntity(User userDto) {
+        return UserEntity.builder()
+                .id(userDto.getId())
+                .keycloakId(userDto.getKeycloakId())
+                .username(userDto.getUsername())
+                .email(userDto.getEmail())
+                .status(userDto.getStatus())
+                .roles(userDto.getRoles() != null ? new ArrayList<>(userDto.getRoles()) : new ArrayList<>())
+                .lastLogin(userDto.getLastLogin())
+                .build();
     }
 }
