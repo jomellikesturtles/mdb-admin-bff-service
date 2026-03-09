@@ -34,6 +34,13 @@ spring:
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
+
+grpc:
+  client:
+    media-gateway:
+      host: ${MEDIA_GATEWAY_HOST:localhost}
+      port: ${MEDIA_GATEWAY_PORT:9090}
+
   data:
     redis:
       host: localhost
