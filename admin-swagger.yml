@@ -176,6 +176,97 @@ paths:
           description: Updated successfully
 
   # ---------------------------------------------------------
+  # MEDIA SOURCE MANAGEMENT (Via Media-Data-Gateway)
+  # ---------------------------------------------------------
+  /media-sources:
+    get:
+      summary: Get Paginated Media Sources
+      tags:
+        - Media Sources
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - in: query
+          name: search
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of media sources
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MediaSource'
+    post:
+      summary: Add Media Source Manually
+      tags:
+        - Media Sources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSourceInput'
+      responses:
+        '201':
+          description: Created successfully
+
+  /media-sources/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      summary: Get Media Source by ID
+      tags:
+        - Media Sources
+      responses:
+        '200':
+          description: Media source details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSource'
+    put:
+      summary: Update Media Source (Full)
+      tags:
+        - Media Sources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSourceInput'
+      responses:
+        '200':
+          description: Updated successfully
+    patch:
+      summary: Patch Media Source (Partial)
+      tags:
+        - Media Sources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSourceInput'
+      responses:
+        '200':
+          description: Patched successfully
+    delete:
+      summary: Delete Media Source
+      tags:
+        - Media Sources
+      responses:
+        '204':
+          description: Deleted successfully
+
+  # ---------------------------------------------------------
   # CRAWLER CONTROL (Via Crawler-Service)
   # ---------------------------------------------------------
   /crawler/jobs:
@@ -437,6 +528,59 @@ components:
         status:
           type: string
           enum: [DRAFT, PUBLISHED]
+
+    # --- MEDIA SOURCE ---
+    MediaSource:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sourceHash:
+          type: string
+        resourceUri:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+        downloadSpeed:
+          type: number
+          format: double
+        uploadSpeed:
+          type: number
+          format: double
+        progress:
+          type: number
+          format: double
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MediaSourceInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        sourceHash:
+          type: string
+        resourceUri:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+        progress:
+          type: number
+          format: double
 
     # --- CRAWLER ---
     CrawlerJob:

@@ -40,47 +40,47 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         
-        String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        String token = header.substring(7);
-
-        if (tokenBlacklistService.isTokenBlacklisted(token)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        try {
-            SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-            Claims claims = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-
-            String username = claims.getSubject();
-            
-            if (username != null) {
-                Optional<User> userOptional = userService.findByUsername(username);
-                
-                if (userOptional.isPresent()) {
-                    User user = userOptional.get();
-                    List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
-                            .map(SimpleGrantedAuthority::new)
-                            .collect(Collectors.toList());
-
-                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                            user, null, authorities);
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                }
-            }
-        } catch (Exception e) {
-            // Token invalid or expired
-            SecurityContextHolder.clearContext();
-        }
+//        String header = request.getHeader("Authorization");
+//        if (header == null || !header.startsWith("Bearer ")) {
+//            filterChain.doFilter(request, response);
+//            return;
+//        }
+//
+//        String token = header.substring(7);
+//
+//        if (tokenBlacklistService.isTokenBlacklisted(token)) {
+//            filterChain.doFilter(request, response);
+//            return;
+//        }
+//
+//        try {
+//            SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+//            Claims claims = Jwts.parser()
+//                    .verifyWith(key)
+//                    .build()
+//                    .parseSignedClaims(token)
+//                    .getPayload();
+//
+//            String username = claims.getSubject();
+//
+//            if (username != null) {
+//                Optional<User> userOptional = userService.findByUsername(username);
+//
+//                if (userOptional.isPresent()) {
+//                    User user = userOptional.get();
+//                    List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
+//                            .map(SimpleGrantedAuthority::new)
+//                            .collect(Collectors.toList());
+//
+//                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+//                            user, null, authorities);
+//                    SecurityContextHolder.getContext().setAuthentication(auth);
+//                }
+//            }
+//        } catch (Exception e) {
+//            // Token invalid or expired
+//            SecurityContextHolder.clearContext();
+//        }
 
         filterChain.doFilter(request, response);
     }
