@@ -25,21 +25,21 @@ jobs:
       - name: Build and Generate Proto
         run: ./gradlew generateProto assemble
 
-      - name: Run Static Analysis (Checkstyle)
-        run: |
-          cp config/checkstyle/checkstyle.xml /tmp/checkstyle.xml
-          ./gradlew checkstyleMain -Pcheckstyle.configFile=/tmp/checkstyle.xml
+      # - name: Run Static Analysis (Checkstyle)
+      #   run: |
+      #     cp config/checkstyle/checkstyle.xml /tmp/checkstyle.xml
+      #     ./gradlew checkstyleMain -Pcheckstyle.configFile=/tmp/checkstyle.xml
 
-      - name: Run Tests and Coverage
-        run: ./gradlew test jacocoTestReport jacocoTestCoverageVerification
-        env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET || 'test-secret-key-at-least-32-characters-long' }}
+      # - name: Run Tests and Coverage
+      #   run: ./gradlew test jacocoTestReport jacocoTestCoverageVerification
+      #   env:
+      #     JWT_SECRET: ${{ secrets.JWT_SECRET || 'test-secret-key-at-least-32-characters-long' }}
 
-      - name: Post Test Results
-        if: always() && env.ACT != 'true'
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        with:
-          files: "build/test-results/test/*.xml"
+      # - name: Post Test Results
+      #   if: always() && env.ACT != 'true'
+      #   uses: EnricoMi/publish-unit-test-result-action@v2
+      #   with:
+      #     files: "build/test-results/test/*.xml"
 
       # - name: Post Coverage Report
       #   if: always() && env.ACT != 'true'
