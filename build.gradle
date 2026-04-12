@@ -54,7 +54,7 @@ dependencies {
     compileOnly 'javax.annotation:javax.annotation-api:1.3.2' // For generated gRPC code
 
     // OpenAPI
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 
     // JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.12.3'
