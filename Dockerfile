@@ -1,5 +1,5 @@
 # Stage 1: Build the application
-FROM eclipse-temurin:21-jdk-alpine AS build
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
 # Copy gradle wrapper and build files first for caching
@@ -15,7 +15,6 @@ RUN chmod +x ./gradlew
 COPY src src
 
 # Build the application
-# skipping tests to speed up the build in this example, but in real CI tests should run.
 RUN ./gradlew clean build -x test
 
 # Stage 2: Run the application
