@@ -1,6 +1,7 @@
 package com.mdb.adminbff.config;
 
 import com.mdb.media_data_gateway_service.grpc.TorrentServiceGrpc;
+import io.grpc.ClientInterceptor;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,6 +9,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import jakarta.annotation.PreDestroy;
+import java.util.ArrayList;
+import java.util.List;
 
 @Configuration
 public class GrpcConfig {
@@ -21,9 +24,10 @@ public class GrpcConfig {
     private ManagedChannel channel;
 
     @Bean
-    public ManagedChannel managedChannel() {
+    public ManagedChannel managedChannel(GrpcTraceInterceptor traceInterceptor) {
         this.channel = ManagedChannelBuilder.forAddress(host, port)
                 .usePlaintext()
+                .intercept(traceInterceptor)
                 .build();
         return this.channel;
     }

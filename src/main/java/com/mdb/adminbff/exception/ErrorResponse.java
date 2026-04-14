@@ -16,6 +16,7 @@ public class ErrorResponse implements Serializable {
     private String code;
     private String message;
     private String id;
+    private String traceId;
 
     public ErrorResponse code(String code) {
         this.code = code;
@@ -29,6 +30,11 @@ public class ErrorResponse implements Serializable {
 
     public ErrorResponse id(String id) {
         this.id = id;
+        return this;
+    }
+
+    public ErrorResponse traceId(String traceId) {
+        this.traceId = traceId;
         return this;
     }
 }

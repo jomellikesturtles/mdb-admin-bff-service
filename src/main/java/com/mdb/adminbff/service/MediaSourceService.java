@@ -35,35 +35,24 @@ public class MediaSourceService {
     public PagedResponse<MediaSource> getMediaSources(int page, int limit, String search) {
         logger.debug("Fetching media sources from gRPC. Page: {}, Limit: {}, Search: {}", page, limit, search);
         
-        try {
-            GetTorrentsRequest request = GetTorrentsRequest.newBuilder()
-                    .setPageNumber(page)
-                    .setPageSize(limit)
-                    .build();
-            
-            GetTorrentsResponse response = mediaSourceStub.getTorrents(request);
-            
-            List<MediaSource> items = response.getTorrentsList().stream()
-                    .map(this::mapGrpcToDto)
-                    .collect(Collectors.toList());
+        GetTorrentsRequest request = GetTorrentsRequest.newBuilder()
+                .setPageNumber(page)
+                .setPageSize(limit)
+                .build();
+        
+        GetTorrentsResponse response = mediaSourceStub.getTorrents(request);
+        
+        List<MediaSource> items = response.getTorrentsList().stream()
+                .map(this::mapGrpcToDto)
+                .collect(Collectors.toList());
 
-            return PagedResponse.<MediaSource>builder()
-                    .page(page)
-                    .limit(limit)
-                    .totalDocs((int) response.getTotalCount())
-                    .totalPages((int) Math.ceil((double) response.getTotalCount() / limit))
-                    .items(items)
-                    .build();
-        } catch (Exception e) {
-            logger.error("Error fetching media sources from gRPC: {}", e.getMessage());
-            return PagedResponse.<MediaSource>builder()
-                    .page(page)
-                    .limit(limit)
-                    .totalDocs(0)
-                    .totalPages(0)
-                    .items(List.of())
-                    .build();
-        }
+        return PagedResponse.<MediaSource>builder()
+                .page(page)
+                .limit(limit)
+                .totalDocs((int) response.getTotalCount())
+                .totalPages((int) Math.ceil((double) response.getTotalCount() / limit))
+                .items(items)
+                .build();
     }
 
     private MediaSource mapGrpcToDto(MovieTorrent grpcTorrent) {
@@ -73,10 +62,13 @@ public class MediaSourceService {
             source.setDataJson(grpcTorrent.getDataJson());
             return source;
         } catch (Exception e) {
-            logger.error("Error mapping gRPC MovieTorrent to DTO: {}", e.getMessage());
+            logger.error("Critical error mapping gRPC MovieTorrent dataJson to DTO for IMDB ID {}: {}", 
+                    grpcTorrent.getImdbId(), e.getMessage());
+            // We return a partially populated object to avoid breaking the entire list, 
+            // but log it as an error. Alternatively, throw an exception here if data integrity is strictly required.
             return MediaSource.builder()
                     .imdbId(grpcTorrent.getImdbId())
-                    .name("Unknown (Mapping Error)")
+                    .name("Data Mapping Error")
                     .status("ERROR")
                     .dataJson(grpcTorrent.getDataJson())
                     .build();
@@ -92,11 +84,12 @@ public class MediaSourceService {
             
             MovieTorrent response = mediaSourceStub.getTorrent(request);
             if (response.getDataJson().isEmpty() && response.getImdbId().isEmpty()) {
-                return Optional.empty();
+                logger.warn("Media source {} not found in gRPC, checking local repository", id);
+                return mediaSourceRepository.findById(id).map(this::mapToDto);
             }
             return Optional.ofNullable(mapGrpcToDto(response));
         } catch (Exception e) {
-            logger.error("Error fetching media source {} from gRPC: {}", id, e.getMessage());
+            logger.error("Error fetching media source {} from gRPC: {}. Falling back to local repository.", id, e.getMessage());
             return mediaSourceRepository.findById(id).map(this::mapToDto);
         }
     }
@@ -104,26 +97,27 @@ public class MediaSourceService {
     @Transactional
     public MediaSource addMediaSource(MediaSourceInput input) {
         logger.info("Adding new media source via gRPC: {}", input.getName());
-        try {
-            MediaSource source = MediaSource.builder()
-                    .id(UUID.randomUUID())
-                    .imdbId(input.getImdbId())
-                    .name(input.getName())
-                    .sourceHash(input.getSourceHash())
-                    .resourceUri(input.getResourceUri())
-                    .size(input.getSize())
-                    .status(input.getStatus() != null ? input.getStatus() : "DOWNLOADING")
-                    .progress(input.getProgress() != null ? input.getProgress() : 0.0)
-                    .downloadSpeed(0.0)
-                    .uploadSpeed(0.0)
-                    .build();
+        MediaSource source = MediaSource.builder()
+                .id(UUID.randomUUID())
+                .imdbId(input.getImdbId())
+                .name(input.getName())
+                .sourceHash(input.getSourceHash())
+                .resourceUri(input.getResourceUri())
+                .size(input.getSize())
+                .status(input.getStatus() != null ? input.getStatus() : "DOWNLOADING")
+                .progress(input.getProgress() != null ? input.getProgress() : 0.0)
+                .downloadSpeed(0.0)
+                .uploadSpeed(0.0)
+                .build();
 
+        try {
             MovieTorrent request = mapDtoToGrpc(source);
             MovieTorrent response = mediaSourceStub.saveTorrent(request);
-            
             return mapGrpcToDto(response);
         } catch (Exception e) {
-            logger.error("Error adding media source via gRPC: {}. Falling back to local repo.", e.getMessage());
+            logger.error("gRPC save failed for media source {}: {}. Falling back to local database.", 
+                    input.getName(), e.getMessage());
+            
             MediaSourceEntity entity = MediaSourceEntity.builder()
                     .name(input.getName())
                     .sourceHash(input.getSourceHash())
@@ -164,13 +158,8 @@ public class MediaSourceService {
             if (input.getStatus() != null) source.setStatus(input.getStatus());
             if (input.getProgress() != null) source.setProgress(input.getProgress());
             
-            try {
-                MovieTorrent response = mediaSourceStub.saveTorrent(mapDtoToGrpc(source));
-                return mapGrpcToDto(response);
-            } catch (Exception e) {
-                logger.error("Error updating media source {} via gRPC: {}", id, e.getMessage());
-                return source;
-            }
+            MovieTorrent response = mediaSourceStub.saveTorrent(mapDtoToGrpc(source));
+            return mapGrpcToDto(response);
         });
     }
 
@@ -185,13 +174,8 @@ public class MediaSourceService {
             if (input.getStatus() != null) source.setStatus(input.getStatus());
             if (input.getProgress() != null) source.setProgress(input.getProgress());
             
-            try {
-                MovieTorrent response = mediaSourceStub.saveTorrent(mapDtoToGrpc(source));
-                return mapGrpcToDto(response);
-            } catch (Exception e) {
-                logger.error("Error patching media source {} via gRPC: {}", id, e.getMessage());
-                return source;
-            }
+            MovieTorrent response = mediaSourceStub.saveTorrent(mapDtoToGrpc(source));
+            return mapGrpcToDto(response);
         });
     }
 
