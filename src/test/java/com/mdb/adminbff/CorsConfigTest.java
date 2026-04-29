@@ -21,6 +21,6 @@ class CorsConfigTest {
         assertThat(allowedOrigins).isNotNull();
         // Since we changed to * in SecurityConfig, we can either keep the original check for application.yml values
         // or check if it contains the expected development origins.
-        assertThat(allowedOrigins).contains("http://localhost:5173");
+        assertThat(allowedOrigins).contains("http://localhost:5173", "http://localhost:3001");
     }
 }

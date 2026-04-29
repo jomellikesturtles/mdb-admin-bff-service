@@ -6,7 +6,7 @@ MDB API is a Backend For Frontend (BFF) service designed to power the internal M
 ## 🍃 Story time
 
 The codes in this repository are written entirely by Agentic AI (NOT). But why do it, Jommel? 
-Because I paid xxxxx amount of pesos to robot to do its damn job.
+Because I paid xxxxx amount of pesos to a robot to do its damn job.
 But for real, is to demonstrate the power of AI. A buzzword in the year 2026, the 'Cloud' in 2016, 'Blockchain' in 2015, 'Chuvachoochoo' in 2003
 
 Years ago, a good employer of mine let us use and handle CoPilot.
@@ -15,12 +15,15 @@ At first, I was hesitant to its output, to me it is just a fancy autocomplete, w
 I saw myself frantically pressing tab to every suggestion it makes like what I did when I first discovered the intellisense.
 
 
-Weeks worth of use really was too short to write proper a review about a lifetime Copilot (pun intended), but I saw myself using it as a work buddy and enemy in the future.
-Like the developers before me sees autocomplete as a lazy way to write a code, and using an IDE to the generations before them, saw it as a threat to job security.
-Will it ever replace us? I have no idea, just because you now have a car that doesn't mean it will replace walking, someone still has to drive the car.
+Weeks worth of use really was too short to write a proper review about a lifetime Copilot (pun intended), but I saw myself using it as a work buddy and enemy in the future.
+Like the developers before me who saw autocomplete as a lazy way to write a code, and using an IDE to the generations before them, saw it as a threat to job security.
+
+Will it ever replace us? I have no idea.
+
+Just because you now have a car that lets you travel further in automatic that doesn't mean we will never travel on foot ever again. Someone still has to drive the car for minor corrections if it steered in the way we don't intend to and walk down to our very end destination.
 
 It is not perfect, far from it. But it is better than my programming? Not really (I think), but it can deliver more code lines more than I ever could.
-Does it really care about the end goal? No, at least a junior developer has a heart. 
+Does it really care about the end goal? No, at least a junior developer has a heart who gets scared if he 'accidentally' drops a database.
 
 
 ## 🚀 Technology Stack

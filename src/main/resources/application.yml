@@ -4,7 +4,7 @@ server:
     context-path: /api/v1
 
 cors:
-  allowed-origins: http://localhost:5173
+  allowed-origins: http://localhost:5173,http://localhost:3001
 
 spring:
   application:
@@ -30,6 +30,7 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
   datasource:
+    # url: jdbc:postgresql://localhost:5433/mdb_prod?currentSchema=public
     url: jdbc:postgresql://localhost:5433/mdb_prod
     username: postgres
     password: postgres
