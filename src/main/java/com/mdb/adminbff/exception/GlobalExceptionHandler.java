@@ -1,5 +1,6 @@
 package com.mdb.adminbff.exception;
 
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.slf4j.Logger;
@@ -39,6 +40,35 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .traceId(MDC.get(TRACE_ID_KEY));
 
         return new ResponseEntity<>(errorResponse, errorCode.getHttpStatus());
+    }
+
+    @ExceptionHandler(RequestNotPermitted.class)
+    protected ResponseEntity<Object> handleRequestNotPermitted(RequestNotPermitted ex) {
+        logger.warn("Rate limit exceeded: {}", ex.getMessage());
+        
+        ErrorResponse errorResponse = new ErrorResponse()
+                .code("RATE_LIMIT_EXCEEDED")
+                .message("Too many attempts. Please try again in 15 minutes.")
+                .traceId(MDC.get(TRACE_ID_KEY));
+
+        return new ResponseEntity<>(errorResponse, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    protected ResponseEntity<Object> handleIllegalArgumentException(IllegalArgumentException ex) {
+        logger.warn("Validation error or invalid credentials: {}", ex.getMessage());
+        
+        ErrorResponse errorResponse = new ErrorResponse()
+                .code(ApiErrorCode.BAD_REQUEST_GENERIC.getCode())
+                .message(ex.getMessage())
+                .traceId(MDC.get(TRACE_ID_KEY));
+
+        HttpStatus status = ex.getMessage().contains("credentials") ? HttpStatus.UNAUTHORIZED : HttpStatus.BAD_REQUEST;
+        if (status == HttpStatus.UNAUTHORIZED) {
+            errorResponse.setCode("INVALID_CREDENTIALS");
+        }
+
+        return new ResponseEntity<>(errorResponse, status);
     }
 
     @ExceptionHandler(Exception.class)

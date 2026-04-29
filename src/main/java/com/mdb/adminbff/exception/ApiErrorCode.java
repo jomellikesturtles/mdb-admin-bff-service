@@ -25,7 +25,8 @@ public enum ApiErrorCode {
     UPSTREAM_SERVICE_TIMEOUT("ERR_UPSTREAM_TIMEOUT", "Upstream service request timed out", HttpStatus.GATEWAY_TIMEOUT),
     RESOURCE_NOT_FOUND("ERR_RESOURCE_NOT_FOUND", "The requested resource was not found", HttpStatus.NOT_FOUND),
     PERMISSION_DENIED("ERR_PERMISSION_DENIED", "Permission denied for this operation", HttpStatus.FORBIDDEN),
-    INTERNAL_UPSTREAM_ERROR("ERR_INTERNAL_UPSTREAM", "An internal error occurred in the upstream service", HttpStatus.BAD_GATEWAY);
+    INTERNAL_UPSTREAM_ERROR("ERR_INTERNAL_UPSTREAM", "An internal error occurred in the upstream service", HttpStatus.BAD_GATEWAY),
+    CONFLICT("ERR_CONFLICT", "Resource already exists", HttpStatus.CONFLICT);
 
     private final String code;
     private final String message;
