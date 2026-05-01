@@ -24,6 +24,9 @@
     - User-centric endpoints use `GET` for retrieval (even if the controller implies logic).
     - Use `isEnabled` naming convention for booleans (e.g., `isAutoScanEnabled`).
 
+### 3. GitHub & CI/CD
+- **Pull Requests:** Always use the template defined in `.github/pull_request_template.md` when creating a PR.
+
 ## Environment & Setup
 - **Context Path:** `/mdb` (Configured in `application-dev.yml`).
 - **WebSockets:**

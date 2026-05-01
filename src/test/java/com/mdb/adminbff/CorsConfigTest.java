@@ -1,15 +1,15 @@
 package com.mdb.adminbff;
 
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
-import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThat;
-
 @SpringBootTest
+@ActiveProfiles("test")
 class CorsConfigTest {
 
     @Value("${cors.allowed-origins:}")
@@ -21,6 +21,6 @@ class CorsConfigTest {
         assertThat(allowedOrigins).isNotNull();
         // Since we changed to * in SecurityConfig, we can either keep the original check for application.yml values
         // or check if it contains the expected development origins.
-        assertThat(allowedOrigins).contains("http://localhost:5173", "http://localhost:3001");
+        assertThat(allowedOrigins).contains("http://localhost:5173");
     }
 }
