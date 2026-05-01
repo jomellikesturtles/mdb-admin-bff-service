@@ -18,7 +18,16 @@ public enum ApiErrorCode {
     BAD_REQUEST_GENERIC("BAD_REQUEST_GENERIC", "Invalid request", HttpStatus.BAD_REQUEST),
     TOKEN_INVALID("ERR_TOKEN_INVALID", "Token is invalid", HttpStatus.FORBIDDEN),
     DECRYPTION_FAILURE("ERR_DECRYPTION_FAILURE", "Decryption Failure", HttpStatus.BAD_REQUEST),
-    ENCRYPTION_FAILURE("ERR_ENCRYPTION_FAILURE", "Encryption Failure", HttpStatus.BAD_REQUEST);
+    ENCRYPTION_FAILURE("ERR_ENCRYPTION_FAILURE", "Encryption Failure", HttpStatus.BAD_REQUEST),
+
+    // Upstream / gRPC Mappings
+    UPSTREAM_SERVICE_UNAVAILABLE("ERR_UPSTREAM_UNAVAILABLE", "Upstream service is currently unavailable", HttpStatus.SERVICE_UNAVAILABLE),
+    UPSTREAM_SERVICE_TIMEOUT("ERR_UPSTREAM_TIMEOUT", "Upstream service request timed out", HttpStatus.GATEWAY_TIMEOUT),
+    RESOURCE_NOT_FOUND("ERR_RESOURCE_NOT_FOUND", "The requested resource was not found", HttpStatus.NOT_FOUND),
+    PERMISSION_DENIED("ERR_PERMISSION_DENIED", "Permission denied for this operation", HttpStatus.FORBIDDEN),
+    INTERNAL_UPSTREAM_ERROR("ERR_INTERNAL_UPSTREAM", "An internal error occurred in the upstream service", HttpStatus.BAD_GATEWAY),
+    CONFLICT("ERR_CONFLICT", "Resource already exists", HttpStatus.CONFLICT);
+
     private final String code;
     private final String message;
     private final HttpStatus httpStatus;

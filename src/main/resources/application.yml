@@ -4,7 +4,7 @@ server:
     context-path: /api/v1
 
 cors:
-  allowed-origins: http://localhost:5173
+  allowed-origins: http://localhost:5173,http://localhost:3001
 
 spring:
   application:
@@ -30,6 +30,7 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
   datasource:
+    # url: jdbc:postgresql://localhost:5433/mdb_prod?currentSchema=public
     url: jdbc:postgresql://localhost:5433/mdb_prod
     username: postgres
     password: postgres
@@ -82,6 +83,10 @@ resilience4j:
         limitForPeriod: 10
         limitRefreshPeriod: 10s
         timeoutDuration: 0
+      login:
+        limitForPeriod: 5
+        limitRefreshPeriod: 900s # 15 minutes
+        timeoutDuration: 0
 
 jwt:
   secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
@@ -92,3 +97,5 @@ logging:
   level:
     root: INFO
     com.mdb.adminbff: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{traceId}] %-5level %logger{36} - %msg%n"
