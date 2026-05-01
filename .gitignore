@@ -21,7 +21,7 @@ out/
 Thumbs.db
 
 # Project Specific
-notes/
+# notes/
 *.log
 .gemini/
 bin/

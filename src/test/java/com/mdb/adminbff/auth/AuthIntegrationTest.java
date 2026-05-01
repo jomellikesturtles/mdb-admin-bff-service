@@ -18,9 +18,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.hamcrest.Matchers.*;
 
+import org.springframework.test.context.ActiveProfiles;
+
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 public class AuthIntegrationTest {
+
+    private static final String CONTEXT_PATH = "/api/v1";
 
     @Autowired
     private MockMvc mockMvc;
@@ -47,7 +52,8 @@ public class AuthIntegrationTest {
                 .password("StrongPassword123!")
                 .build();
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        mockMvc.perform(post(CONTEXT_PATH + "/auth/register")
+                .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -74,7 +80,8 @@ public class AuthIntegrationTest {
                 .password("StrongPassword123!")
                 .build();
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        mockMvc.perform(post(CONTEXT_PATH + "/auth/register")
+                .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isConflict());
@@ -88,7 +95,8 @@ public class AuthIntegrationTest {
                 .password("weak")
                 .build();
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        mockMvc.perform(post(CONTEXT_PATH + "/auth/register")
+                .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
@@ -109,7 +117,8 @@ public class AuthIntegrationTest {
                 .password("StrongPassword123!")
                 .build();
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post(CONTEXT_PATH + "/auth/login")
+                .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -125,10 +134,11 @@ public class AuthIntegrationTest {
                 .password("WrongPassword123!")
                 .build();
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post(CONTEXT_PATH + "/auth/login")
+                .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.code", is("UNHANDLED_ERROR")));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code", is("INVALID_CREDENTIALS")));
     }
 }

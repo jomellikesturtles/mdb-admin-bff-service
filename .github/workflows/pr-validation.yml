@@ -26,9 +26,7 @@ jobs:
         run: ./gradlew generateProto assemble
 
       # - name: Run Static Analysis (Checkstyle)
-      #   run: |
-      #     cp config/checkstyle/checkstyle.xml /tmp/checkstyle.xml
-      #     ./gradlew checkstyleMain -Pcheckstyle.configFile=/tmp/checkstyle.xml
+      #   run: ./gradlew checkstyle
 
       # - name: Run Tests and Coverage
       #   run: ./gradlew test jacocoTestReport jacocoTestCoverageVerification
