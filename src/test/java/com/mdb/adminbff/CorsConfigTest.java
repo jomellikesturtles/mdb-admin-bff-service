@@ -8,9 +8,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+
 @SpringBootTest
 @ActiveProfiles("test")
 class CorsConfigTest {
+
+    @MockBean
+    private JwtDecoder jwtDecoder;
 
     @Value("${cors.allowed-origins:}")
     private List<String> allowedOrigins;
