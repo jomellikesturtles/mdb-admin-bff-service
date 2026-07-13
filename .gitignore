@@ -21,7 +21,9 @@ out/
 Thumbs.db
 
 # Project Specific
-# notes/
+notes/
+task.md
+GRPC_CONSUMER_GUIDE.md
 *.log
 .gemini/
 bin/

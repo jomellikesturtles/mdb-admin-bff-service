@@ -2,11 +2,16 @@ package com.mdb.adminbff.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdb.adminbff.dto.*;
-import com.mdb.adminbff.entity.AdminUserEntity;
 import com.mdb.adminbff.exception.ApiErrorCode;
 import com.mdb.adminbff.exception.ApiException;
 import com.mdb.adminbff.exception.BaseApiError;
-import com.mdb.adminbff.repository.AdminUserRepository;
+import com.mdb.user_data_gateway_service.grpc.AdminUserServiceGrpc;
+import com.mdb.user_data_gateway_service.grpc.AdminUserRegisterRequest;
+import com.mdb.user_data_gateway_service.grpc.AdminUserRegisterResponse;
+import com.mdb.user_data_gateway_service.grpc.AdminUserLoginRequest;
+import com.mdb.user_data_gateway_service.grpc.AdminUserResponse;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,15 +21,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
-
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -35,8 +37,7 @@ public class AuthService {
     private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
 
     private final TokenBlacklistService tokenBlacklistService;
-    private final AdminUserRepository adminUserRepository;
-    private final PasswordEncoder passwordEncoder;
+    private final AdminUserServiceGrpc.AdminUserServiceBlockingStub adminUserStub;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
 
@@ -52,12 +53,21 @@ public class AuthService {
     public GenericResponse<LoginResponse> login(LoginRequest request) {
         logger.info("Attempting admin login via Keycloak proxy for email: {}", request.getEmail());
 
-        // 1. Verify locally that the admin user exists and is active
-        AdminUserEntity admin = adminUserRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> {
-                    logger.warn("Login failed: Email not found in local database: {}", request.getEmail());
-                    return new IllegalArgumentException("Invalid credentials");
-                });
+        // 1. Verify via remote AdminUserService that credentials are correct and admin is active
+        AdminUserResponse admin;
+        try {
+            admin = adminUserStub.loginAdmin(AdminUserLoginRequest.newBuilder()
+                    .setUsernameOrEmail(request.getEmail())
+                    .setPassword(request.getPassword())
+                    .build());
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+                logger.warn("Login failed: invalid credentials for email: {}", request.getEmail());
+                throw new IllegalArgumentException("Invalid credentials");
+            }
+            logger.error("Admin login gRPC call failed: {}", e.getMessage());
+            throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "GATEWAY_ERROR", "Failed to authenticate admin user: " + e.getMessage()));
+        }
 
         if (!"ACTIVE".equals(admin.getStatus())) {
             logger.warn("Login failed: User status is {}: {}", admin.getStatus(), request.getEmail());
@@ -71,9 +81,7 @@ public class AuthService {
         if (clientSecret != null && !clientSecret.isEmpty() && !"client-secret-placeholder".equals(clientSecret)) {
             body.add("client_secret", clientSecret);
         }
-//        body.add("username", request.getEmail());
         body.add("username", admin.getUsername());
-
         body.add("password", request.getPassword());
         body.add("scope", "openid");
 
@@ -116,7 +124,6 @@ public class AuthService {
                 .build();
     }
 
-    @Transactional
     public GenericResponse<Map<String, Object>> registerAdmin(RegisterRequest request) {
         logger.info("Attempting admin registration for email: {}", request.getEmailAddress());
 
@@ -124,47 +131,44 @@ public class AuthService {
         String sanitizedUsername = sanitizeInput(request.getUsername());
         String sanitizedEmail = sanitizeInput(request.getEmailAddress()).toLowerCase();
 
-        // Uniqueness check
-        if (adminUserRepository.findByEmail(sanitizedEmail).isPresent() || 
-            adminUserRepository.findByUsername(sanitizedUsername).isPresent()) {
-            logger.warn("Registration failed: Email or username already exists: {}", sanitizedEmail);
-            throw new ApiException(new BaseApiError(ApiErrorCode.CONFLICT));
-        }
-
         // 1. Authenticate with Keycloak as Admin Client
         String adminToken = getAdminAccessToken();
 
         // 2. Provision User in Keycloak
         String keycloakUserId = provisionUserInKeycloak(adminToken, sanitizedUsername, sanitizedEmail, request.getPassword());
 
-        // 3. Hash and Persist locally with compensation on failure
-        AdminUserEntity admin = AdminUserEntity.builder()
-                .username(sanitizedUsername)
-                .email(sanitizedEmail)
-                .password(passwordEncoder.encode(request.getPassword()))
-                .status("ACTIVE")
-                .build();
-
-        AdminUserEntity saved;
+        // 3. Persist on remote gateway via gRPC with compensation on failure
         try {
-            saved = adminUserRepository.save(admin);
-            logger.info("Admin registered successfully in local database: {}", saved.getEmail());
+            AdminUserRegisterResponse regResponse = adminUserStub.registerAdmin(AdminUserRegisterRequest.newBuilder()
+                    .setUsername(sanitizedUsername)
+                    .setEmail(sanitizedEmail)
+                    .setPassword(request.getPassword())
+                    .build());
+
+            if (!regResponse.getSuccess()) {
+                logger.warn("Admin registration failed on gateway: {}", regResponse.getMessage());
+                if (regResponse.getMessage().contains("exists")) {
+                    throw new ApiException(new BaseApiError(ApiErrorCode.CONFLICT));
+                }
+                throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.BAD_REQUEST, "REGISTRATION_FAILED", regResponse.getMessage()));
+            }
+
+            logger.info("Admin registered successfully in gateway: {}", sanitizedEmail);
+
+            Map<String, Object> userData = Map.of(
+                    "id", regResponse.getId(),
+                    "username", sanitizedUsername,
+                    "email", sanitizedEmail
+            );
+
+            return GenericResponse.success("User registered successfully", Map.of(
+                    "user", userData
+            ));
         } catch (Exception e) {
-            logger.error("Local database save failed for registered admin: {}. Executing Keycloak compensation delete...", sanitizedEmail, e);
+            logger.error("Gateway database save failed for registered admin: {}. Executing Keycloak compensation delete...", sanitizedEmail, e);
             deleteUserInKeycloak(adminToken, keycloakUserId);
             throw e;
         }
-
-        // Response Construction
-        Map<String, Object> userData = Map.of(
-                "id", saved.getId().toString(),
-                "username", saved.getUsername(),
-                "email", saved.getEmail()
-        );
-
-        return GenericResponse.success("User registered successfully", Map.of(
-                "user", userData
-        ));
     }
 
     private String getAdminAccessToken() {
@@ -214,8 +218,11 @@ public class AuthService {
         Map<String, Object> userBody = Map.of(
                 "username", username,
                 "email", email,
+                "firstName", username,
+                "lastName", "Admin",
                 "enabled", true,
                 "emailVerified", true,
+                "requiredActions", List.of(),
                 "credentials", List.of(credential)
         );
 

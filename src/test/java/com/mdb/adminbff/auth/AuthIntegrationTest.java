@@ -1,13 +1,28 @@
 package com.mdb.adminbff.auth;
 
+import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdb.adminbff.dto.LoginRequest;
 import com.mdb.adminbff.dto.RegisterRequest;
-import com.mdb.adminbff.entity.AdminUserEntity;
-import com.mdb.adminbff.repository.AdminUserRepository;
-import org.junit.jupiter.api.BeforeEach;
+import com.mdb.media_data_gateway_service.grpc.MediaServiceGrpc;
+import com.mdb.media_data_gateway_service.grpc.TorrentServiceGrpc;
+import com.mdb.user_data_gateway_service.grpc.AdminUserServiceGrpc;
+import com.mdb.user_data_gateway_service.grpc.AdminUserRegisterRequest;
+import com.mdb.user_data_gateway_service.grpc.AdminUserRegisterResponse;
+import com.mdb.user_data_gateway_service.grpc.AdminUserLoginRequest;
+import com.mdb.user_data_gateway_service.grpc.AdminUserResponse;
+import com.mdb.user_data_gateway_service.grpc.UserServiceGrpc;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -17,31 +32,14 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
 import java.util.Map;
-import java.util.Optional;
-import static org.assertj.core.api.Assertions.assertThat;
-
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.notNullValue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.mock.mockito.SpyBean;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -56,12 +54,6 @@ public class AuthIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @SpyBean
-    private AdminUserRepository adminUserRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
     @Autowired
     private ObjectMapper objectMapper;
 
@@ -71,14 +63,28 @@ public class AuthIntegrationTest {
     @MockBean
     private JwtDecoder jwtDecoder;
 
-    @BeforeEach
-    void setUp() {
-        adminUserRepository.deleteAll();
-    }
+    @MockBean
+    private AdminUserServiceGrpc.AdminUserServiceBlockingStub adminUserStub;
+
+    @MockBean
+    private UserServiceGrpc.UserServiceBlockingStub userStub;
+
+    @MockBean
+    private MediaServiceGrpc.MediaServiceBlockingStub mediaItemStub;
+
+    @MockBean
+    private TorrentServiceGrpc.TorrentServiceBlockingStub mediaSourceStub;
 
     @Test
     void testSuccessfulRegistration() throws Exception {
         stubKeycloakRegistration();
+
+        when(adminUserStub.registerAdmin(any(AdminUserRegisterRequest.class)))
+                .thenReturn(AdminUserRegisterResponse.newBuilder()
+                        .setSuccess(true)
+                        .setMessage("Admin registered successfully")
+                        .setId("mock-admin-id")
+                        .build());
 
         RegisterRequest request = RegisterRequest.builder()
                 .username("adminTester")
@@ -99,13 +105,13 @@ public class AuthIntegrationTest {
 
     @Test
     void testDuplicateEmailPrevention() throws Exception {
-        // Pre-create user
-        adminUserRepository.save(AdminUserEntity.builder()
-                .username("existingUser")
-                .email("tester@example.com")
-                .password("anyPassword")
-                .status("ACTIVE")
-                .build());
+        stubKeycloakRegistration();
+
+        when(adminUserStub.registerAdmin(any(AdminUserRegisterRequest.class)))
+                .thenReturn(AdminUserRegisterResponse.newBuilder()
+                        .setSuccess(false)
+                        .setMessage("Username or Email already exists")
+                        .build());
 
         RegisterRequest request = RegisterRequest.builder()
                 .username("newUsername")
@@ -137,13 +143,13 @@ public class AuthIntegrationTest {
 
     @Test
     void testSuccessfulLogin() throws Exception {
-        // Pre-create hashed user
-        adminUserRepository.save(AdminUserEntity.builder()
-                .username("loginTester")
-                .email("login@example.com")
-                .password(passwordEncoder.encode("StrongPassword123!"))
-                .status("ACTIVE")
-                .build());
+        when(adminUserStub.loginAdmin(any(AdminUserLoginRequest.class)))
+                .thenReturn(AdminUserResponse.newBuilder()
+                        .setId("mock-admin-id")
+                        .setUsername("loginTester")
+                        .setEmail("login@example.com")
+                        .setStatus("ACTIVE")
+                        .build());
 
         LoginRequest request = LoginRequest.builder()
                 .email("login@example.com")
@@ -171,12 +177,14 @@ public class AuthIntegrationTest {
 
     @Test
     void testInvalidCredentials() throws Exception {
+        when(adminUserStub.loginAdmin(any(AdminUserLoginRequest.class)))
+                .thenThrow(new io.grpc.StatusRuntimeException(io.grpc.Status.UNAUTHENTICATED.withDescription("Invalid credentials")));
+
         LoginRequest request = LoginRequest.builder()
                 .email("nonexistent@example.com")
                 .password("WrongPassword123!")
                 .build();
 
-        // Simulate local lookup failure (nonexistent email)
         mockMvc.perform(post(CONTEXT_PATH + "/auth/login")
                 .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -196,7 +204,13 @@ public class AuthIntegrationTest {
     void testRegistrationThenLoginFlow() throws Exception {
         stubKeycloakRegistrationAndLogin();
 
-        // 1. Register new admin
+        when(adminUserStub.registerAdmin(any(AdminUserRegisterRequest.class)))
+                .thenReturn(AdminUserRegisterResponse.newBuilder()
+                        .setSuccess(true)
+                        .setMessage("Admin registered successfully")
+                        .setId("mock-flow-admin-id")
+                        .build());
+
         RegisterRequest registerReq = RegisterRequest.builder()
                 .username("newAdminFlow")
                 .emailAddress("flow@example.com")
@@ -211,13 +225,14 @@ public class AuthIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status", is("success")));
 
-        // 2. Verify saved in database
-        Optional<AdminUserEntity> savedAdmin = adminUserRepository.findByEmail("flow@example.com");
-        assertThat(savedAdmin).isPresent();
-        assertThat(savedAdmin.get().getUsername()).isEqualTo("newAdminFlow");
-        assertThat(savedAdmin.get().getStatus()).isEqualTo("ACTIVE");
+        when(adminUserStub.loginAdmin(any(AdminUserLoginRequest.class)))
+                .thenReturn(AdminUserResponse.newBuilder()
+                        .setId("mock-flow-admin-id")
+                        .setUsername("newAdminFlow")
+                        .setEmail("flow@example.com")
+                        .setStatus("ACTIVE")
+                        .build());
 
-        // 3. Log in as the registered admin (using the stubbed credentials flow)
         LoginRequest loginReq = LoginRequest.builder()
                 .email("flow@example.com")
                 .password("StrongPass123!")
@@ -241,11 +256,9 @@ public class AuthIntegrationTest {
         String realm = tokenUri.substring(tokenUri.indexOf("/realms/") + 8, tokenUri.indexOf("/protocol/"));
         String deleteUserUri = serverUrl + "/admin/realms/" + realm + "/users/mock-user-id-123";
 
-        // Mock repository save to throw an exception
-        org.mockito.Mockito.doThrow(new RuntimeException("DB error"))
-                .when(adminUserRepository).save(any(AdminUserEntity.class));
+        when(adminUserStub.registerAdmin(any(AdminUserRegisterRequest.class)))
+                .thenThrow(new io.grpc.StatusRuntimeException(io.grpc.Status.INTERNAL.withDescription("DB error")));
 
-        // Mock Keycloak DELETE call
         when(restTemplate.exchange(
                 eq(deleteUserUri),
                 eq(HttpMethod.DELETE),
@@ -263,9 +276,8 @@ public class AuthIntegrationTest {
                 .contextPath(CONTEXT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isBadGateway());
 
-        // Verify that DELETE call was triggered as compensation
         org.mockito.Mockito.verify(restTemplate).exchange(
                 eq(deleteUserUri),
                 eq(HttpMethod.DELETE),

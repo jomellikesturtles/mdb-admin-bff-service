@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package user;
+
+option java_multiple_files = true;
+option java_package = "com.mdb.user_data_gateway_service.grpc";
+option java_outer_classname = "UserServiceProto";
+
+message UserAccountCreatedRequest {
+    string userId = 1;
+    string accountId = 2;
+    string username = 3;
+    string email = 4;
+}
+
+message UserAccountCreatedResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message UserRequest {
+    string id = 1;
+    string username = 2;
+    string email = 3;
+}
+
+message AuthenticateRequest {
+    string email_or_username = 1;
+    string password = 2;
+}
+
+message RegisterRequest {
+    string username = 1;
+    string email = 2;
+    string first_name = 3;
+    string last_name = 4;
+    string password = 5;
+    string account_id = 6;
+}
+
+message UserResponse {
+    string id = 1;
+    string username = 2;
+    string email = 3;
+    string first_name = 4;
+    string last_name = 5;
+    string account_id = 6;
+    bool is_active = 7;
+    repeated string roles = 8;
+    string status = 9;
+    string keycloak_id = 10;
+    string last_login = 11;
+}
+
+message ActionResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetUsersRequest {
+    int32 page = 1;
+    int32 limit = 2;
+    string search = 3;
+}
+
+message GetUsersResponse {
+    repeated UserResponse users = 1;
+    int64 total_count = 2;
+    int32 total_pages = 3;
+}
+
+message GetUserByKeycloakIdRequest {
+    string keycloak_id = 1;
+}
+
+message SaveUserRequest {
+    string id = 1;
+    string keycloak_id = 2;
+    string username = 3;
+    string email = 4;
+    string status = 5;
+    repeated string roles = 6;
+}
+
+message UpdateUserStatusRequest {
+    string id = 1;
+    string status = 2;
+    string reason = 3;
+}
+
+message CountUsersRequest {}
+
+message CountResponse {
+    int64 count = 1;
+}
+
+service UserService {
+    rpc triggerUserAccountCreated(UserAccountCreatedRequest) returns (UserAccountCreatedResponse);
+    rpc GetUserById (UserRequest) returns (UserResponse);
+    rpc GetUserByUsername (UserRequest) returns (UserResponse);
+    rpc GetUserByEmailOrUsername (UserRequest) returns (UserResponse);
+    rpc Authenticate (AuthenticateRequest) returns (UserResponse);
+    rpc RegisterUser (RegisterRequest) returns (ActionResponse);
+    rpc UpdateUser (UserResponse) returns (UserResponse);
+    
+    // Integrated Admin-BFF specific RPCs
+    rpc GetUsers(GetUsersRequest) returns (GetUsersResponse);
+    rpc GetUserByKeycloakId(GetUserByKeycloakIdRequest) returns (UserResponse);
+    rpc SaveUser(SaveUserRequest) returns (UserResponse);
+    rpc UpdateUserStatus(UpdateUserStatusRequest) returns (UserResponse);
+    rpc CountUsers(CountUsersRequest) returns (CountResponse);
+}

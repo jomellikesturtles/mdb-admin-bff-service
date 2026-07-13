@@ -2,19 +2,18 @@ package com.mdb.adminbff.service;
 
 import com.mdb.adminbff.dto.PagedResponse;
 import com.mdb.adminbff.dto.User;
-import com.mdb.adminbff.entity.UserEntity;
-import com.mdb.adminbff.repository.UserRepository;
+import com.mdb.user_data_gateway_service.grpc.*;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -26,65 +25,94 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private static final Logger logger = LoggerFactory.getLogger(UserService.class);
-    private final UserRepository userRepository;
+    private final UserServiceGrpc.UserServiceBlockingStub userStub;
 
-@Cacheable(value = "users", key = "#page + '-' + #limit + '-' + #search")
-@CircuitBreaker(name = "externalService", fallbackMethod = "fallbackGetUsers")
-@Transactional(readOnly = true)
-public PagedResponse<User> getUsers(int page, int limit, String search) {
-        logger.debug("Fetching users. Page: {}, Limit: {}, Search: {}", page, limit, search);
+    @Cacheable(value = "users", key = "#page + '-' + #limit + '-' + #search")
+    @CircuitBreaker(name = "externalService", fallbackMethod = "fallbackGetUsers")
+    public PagedResponse<User> getUsers(int page, int limit, String search) {
+        logger.debug("Fetching users via gRPC. Page: {}, Limit: {}, Search: {}", page, limit, search);
         
-        PageRequest pageRequest = PageRequest.of(page - 1, limit);
-        Page<UserEntity> userPage;
+        GetUsersRequest request = GetUsersRequest.newBuilder()
+                .setPage(page)
+                .setLimit(limit)
+                .setSearch(search != null ? search : "")
+                .build();
         
-        if (search != null && !search.isEmpty()) {
-            userPage = userRepository.findByUsernameContainingOrEmailContaining(search, search, pageRequest);
-        } else {
-            userPage = userRepository.findAll(pageRequest);
-        }
+        GetUsersResponse response = userStub.getUsers(request);
 
-        List<User> items = userPage.getContent().stream()
-                .map(this::mapToDto)
+        List<User> items = response.getUsersList().stream()
+                .map(this::mapGrpcToDto)
                 .collect(Collectors.toList());
 
-        logger.info("Fetched {} users out of {}", items.size(), userPage.getTotalElements());
+        logger.info("Fetched {} users out of {}", items.size(), response.getTotalCount());
         return PagedResponse.<User>builder()
                 .page(page)
                 .limit(limit)
-                .totalDocs((int) userPage.getTotalElements())
-                .totalPages(userPage.getTotalPages())
+                .totalDocs((int) response.getTotalCount())
+                .totalPages(response.getTotalPages())
                 .items(items)
                 .build();
     }
 
     @Cacheable(value = "user", key = "#id")
     public Optional<User> getUserById(UUID id) {
-        logger.debug("Fetching user by ID: {}", id);
-        return userRepository.findById(id).map(this::mapToDto);
+        logger.debug("Fetching user by ID via gRPC: {}", id);
+        try {
+            UserResponse response = userStub.getUserById(
+                    UserRequest.newBuilder()
+                            .setId(id.toString())
+                            .build()
+            );
+            return Optional.of(mapGrpcToDto(response));
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
+                return Optional.empty();
+            }
+            throw e;
+        }
     }
 
     public Optional<User> findByUsername(String username) {
-        logger.debug("Fetching user by username: {}", username);
-        return userRepository.findByUsername(username).map(this::mapToDto);
+        logger.debug("Fetching user by username via gRPC: {}", username);
+        try {
+            UserResponse response = userStub.getUserByUsername(
+                    UserRequest.newBuilder()
+                            .setUsername(username)
+                            .build()
+            );
+            return Optional.of(mapGrpcToDto(response));
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
+                return Optional.empty();
+            }
+            throw e;
+        }
     }
 
-    @Transactional
     public User saveUser(User userDto) {
-        logger.info("Saving user: {}", userDto.getUsername());
-        UserEntity entity = mapToEntity(userDto);
-        UserEntity saved = userRepository.save(entity);
-        return mapToDto(saved);
+        logger.info("Saving user via gRPC: {}", userDto.getUsername());
+        SaveUserRequest request = SaveUserRequest.newBuilder()
+                .setId(userDto.getId() != null ? userDto.getId().toString() : "")
+                .setKeycloakId(userDto.getKeycloakId() != null ? userDto.getKeycloakId() : "")
+                .setUsername(userDto.getUsername() != null ? userDto.getUsername() : "")
+                .setEmail(userDto.getEmail() != null ? userDto.getEmail() : "")
+                .setStatus(userDto.getStatus() != null ? userDto.getStatus() : "")
+                .addAllRoles(userDto.getRoles() != null ? userDto.getRoles() : List.of())
+                .build();
+
+        UserResponse response = userStub.saveUser(request);
+        return mapGrpcToDto(response);
     }
 
-    @Transactional
     @CacheEvict(value = {"user", "users"}, allEntries = true)
     public void banUser(UUID id, String status, String reason) {
-        logger.warn("Banning user ID: {}. Status: {}. Reason: {}", id, status, reason);
-        userRepository.findById(id).ifPresent(u -> {
-            u.setStatus(status);
-            userRepository.save(u);
-            logger.info("User {} status updated to {}", u.getUsername(), status);
-        });
+        logger.warn("Banning user ID via gRPC: {}. Status: {}. Reason: {}", id, status, reason);
+        UpdateUserStatusRequest request = UpdateUserStatusRequest.newBuilder()
+                .setId(id.toString())
+                .setStatus(status)
+                .setReason(reason != null ? reason : "")
+                .build();
+        userStub.updateUserStatus(request);
     }
 
     public PagedResponse<User> fallbackGetUsers(int page, int limit, String search, Throwable t) {
@@ -98,27 +126,27 @@ public PagedResponse<User> getUsers(int page, int limit, String search) {
                 .build();
     }
 
-    private User mapToDto(UserEntity entity) {
+    private User mapGrpcToDto(UserResponse entity) {
         return User.builder()
-                .id(entity.getId())
+                .id(entity.getId().isEmpty() ? null : UUID.fromString(entity.getId()))
                 .keycloakId(entity.getKeycloakId())
                 .username(entity.getUsername())
                 .email(entity.getEmail())
                 .status(entity.getStatus())
-                .roles(entity.getRoles() != null ? new ArrayList<>(entity.getRoles()) : new ArrayList<>())
-                .lastLogin(entity.getLastLogin())
+                .roles(entity.getRolesList() != null ? new ArrayList<>(entity.getRolesList()) : new ArrayList<>())
+                .lastLogin(parseLocalDateTime(entity.getLastLogin()))
                 .build();
     }
 
-    private UserEntity mapToEntity(User userDto) {
-        return UserEntity.builder()
-                .id(userDto.getId())
-                .keycloakId(userDto.getKeycloakId())
-                .username(userDto.getUsername())
-                .email(userDto.getEmail())
-                .status(userDto.getStatus())
-                .roles(userDto.getRoles() != null ? new ArrayList<>(userDto.getRoles()) : new ArrayList<>())
-                .lastLogin(userDto.getLastLogin())
-                .build();
+    private LocalDateTime parseLocalDateTime(String value) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(value);
+        } catch (Exception e) {
+            logger.warn("Failed to parse LocalDateTime: {}", value);
+            return null;
+        }
     }
 }

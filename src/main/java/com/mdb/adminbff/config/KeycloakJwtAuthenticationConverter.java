@@ -1,10 +1,16 @@
 package com.mdb.adminbff.config;
 
-import com.mdb.adminbff.entity.AdminUserEntity;
-import com.mdb.adminbff.entity.UserEntity;
-import com.mdb.adminbff.repository.AdminUserRepository;
-import com.mdb.adminbff.repository.UserRepository;
+import com.mdb.user_data_gateway_service.grpc.AdminUserServiceGrpc;
+import com.mdb.user_data_gateway_service.grpc.GetAdminUsersRequest;
+import com.mdb.user_data_gateway_service.grpc.GetAdminUsersResponse;
+import com.mdb.user_data_gateway_service.grpc.GetUserByKeycloakIdRequest;
+import com.mdb.user_data_gateway_service.grpc.UserResponse;
+import com.mdb.user_data_gateway_service.grpc.UserServiceGrpc;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -22,8 +28,10 @@ import java.util.*;
 @RequiredArgsConstructor
 public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 
-    private final AdminUserRepository adminUserRepository;
-    private final UserRepository userRepository;
+    private static final Logger LOGGER = LoggerFactory.getLogger(KeycloakJwtAuthenticationConverter.class);
+
+    private final AdminUserServiceGrpc.AdminUserServiceBlockingStub adminUserStub;
+    private final UserServiceGrpc.UserServiceBlockingStub userStub;
 
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
@@ -60,13 +68,7 @@ public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, Abstra
 
         // Check if Admin
         if (email != null) {
-            Optional<AdminUserEntity> adminOptional = adminUserRepository.findByEmail(email);
-            if (adminOptional.isPresent()) {
-                AdminUserEntity admin = adminOptional.get();
-                if (!"ACTIVE".equals(admin.getStatus())) {
-                    throw new OAuth2AuthenticationException(new OAuth2Error(
-                            OAuth2ErrorCodes.ACCESS_DENIED, "Admin account is not active: " + admin.getStatus(), null));
-                }
+            if (isAdminEmail(email)) {
                 authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
                 return new JwtAuthenticationToken(jwt, authorities, email);
             }
@@ -74,25 +76,52 @@ public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, Abstra
 
         // Check if Regular Client User
         if (keycloakId != null) {
-            Optional<UserEntity> userOptional = userRepository.findByKeycloakId(keycloakId);
-            if (userOptional.isPresent()) {
-                UserEntity user = userOptional.get();
-                if (!"ACTIVE".equals(user.getStatus())) {
+            try {
+                UserResponse user = userStub.getUserByKeycloakId(
+                        GetUserByKeycloakIdRequest.newBuilder()
+                                .setKeycloakId(keycloakId)
+                                .build()
+                );
+                if (user != null && !user.getId().isEmpty()) {
+                    if (!"ACTIVE".equals(user.getStatus())) {
+                        throw new OAuth2AuthenticationException(new OAuth2Error(
+                                OAuth2ErrorCodes.ACCESS_DENIED, "User account is not active: " + user.getStatus(), null));
+                    }
+                    if (user.getRolesCount() > 0) {
+                        user.getRolesList().stream()
+                                .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase()))
+                                .forEach(authorities::add);
+                    }
+                    String username = !user.getUsername().isEmpty() ? user.getUsername() : email;
+                    return new JwtAuthenticationToken(jwt, authorities, username);
+                }
+            } catch (StatusRuntimeException e) {
+                if (e.getStatus().getCode() != Status.Code.NOT_FOUND) {
                     throw new OAuth2AuthenticationException(new OAuth2Error(
-                            OAuth2ErrorCodes.ACCESS_DENIED, "User account is not active: " + user.getStatus(), null));
+                            OAuth2ErrorCodes.SERVER_ERROR, "Failed to reach user-data-gateway-service: " + e.getMessage(), null), e);
                 }
-                if (user.getRoles() != null) {
-                    user.getRoles().stream()
-                            .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase()))
-                            .forEach(authorities::add);
-                }
-                String username = user.getUsername() != null ? user.getUsername() : email;
-                return new JwtAuthenticationToken(jwt, authorities, username);
             }
         }
 
         // Neither admin nor registered regular user
         throw new OAuth2AuthenticationException(new OAuth2Error(
                 OAuth2ErrorCodes.INVALID_TOKEN, "User is not registered in the local database", null));
+    }
+
+    private boolean isAdminEmail(String email) {
+        if (email == null) return false;
+        try {
+            GetAdminUsersResponse response = adminUserStub.getAdminUsers(
+                    GetAdminUsersRequest.newBuilder()
+                            .setPage(0)
+                            .setSize(100)
+                            .build()
+            );
+            return response.getUsersList().stream()
+                    .anyMatch(admin -> email.equalsIgnoreCase(admin.getEmail()) && "ACTIVE".equals(admin.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("Failed to query admin users list from gateway: {}", e.getMessage());
+            return false;
+        }
     }
 }
