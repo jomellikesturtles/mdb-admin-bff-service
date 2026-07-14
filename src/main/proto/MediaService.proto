@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package com.mdb.media_data_gateway_service.grpc;
+
+option java_multiple_files = true;
+option java_package = "com.mdb.media_data_gateway_service.grpc";
+
+service MediaService {
+  rpc GetMediaItems(GetMediaItemsRequest) returns (GetMediaItemsResponse);
+  rpc GetMediaItemById(GetMediaItemByIdRequest) returns (MediaItemResponse);
+  rpc SaveMediaItem(SaveMediaItemRequest) returns (MediaItemResponse);
+  rpc CountMediaItems(CountMediaItemsRequest) returns (CountResponse);
+}
+
+message GetMediaItemsRequest {
+  int32 page = 1;
+  int32 limit = 2;
+  string status = 3;
+}
+
+message GetMediaItemsResponse {
+  repeated MediaItemResponse items = 1;
+  int64 total_count = 2;
+  int32 total_pages = 3;
+}
+
+message GetMediaItemByIdRequest {
+  string id = 1;
+}
+
+message SaveMediaItemRequest {
+  string id = 1;
+  string title = 2;
+  string poster_url = 3;
+  string status = 4;
+  int32 release_year = 5;
+}
+
+message CountMediaItemsRequest {}
+
+message CountResponse {
+  int64 count = 1;
+}
+
+message MediaItemResponse {
+  string id = 1;
+  string title = 2;
+  string poster_url = 3;
+  string status = 4;
+  int32 release_year = 5;
+}

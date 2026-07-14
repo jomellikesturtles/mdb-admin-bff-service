@@ -9,13 +9,13 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class CrawlEventListener {
+public class UserAccountEventListener {
 
     private final SimpMessagingTemplate messagingTemplate;
 
-//    @KafkaListener(topics = "crawl-failed", groupId = "mdb-admin-group")
-//    public void handleCrawlFailed(String message) {
-//        log.info("Received crawl-failed event: {}", message);
-//        messagingTemplate.convertAndSend("/topic/errors", message);
-//    }
+    @KafkaListener(topics = "user.account.created", groupId = "mdb-admin-group")
+    public void handleUserAccountCreated(String message) {
+        log.info("Received user.account.created event: {}", message);
+        messagingTemplate.convertAndSend("/topic/user-created", message);
+    }
 }

@@ -27,7 +27,7 @@ public class AuthController {
 
     @Operation(summary = "Login")
     @PostMapping("/login")
-    @RateLimiter(name = "login")
+//    @RateLimiter(name = "login")
     public ResponseEntity<GenericResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }

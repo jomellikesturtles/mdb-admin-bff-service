@@ -3,14 +3,12 @@ package com.mdb.adminbff.service;
 import com.mdb.adminbff.dto.MediaItem;
 import com.mdb.adminbff.dto.MediaItemInput;
 import com.mdb.adminbff.dto.PagedResponse;
-import com.mdb.adminbff.entity.MediaItemEntity;
-import com.mdb.adminbff.repository.MediaItemRepository;
+import com.mdb.media_data_gateway_service.grpc.*;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -21,65 +19,72 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MediaService {
 
-    private final MediaItemRepository mediaItemRepository;
+    private final MediaServiceGrpc.MediaServiceBlockingStub mediaItemStub;
 
     @RateLimiter(name = "externalService")
     public PagedResponse<MediaItem> getMedia(int page, int limit, String status) {
-        PageRequest pageRequest = PageRequest.of(page - 1, limit);
-        Page<MediaItemEntity> mediaPage;
-        
-        // Note: For simplicity, we are filtering by status if provided. 
-        // A more complex query could be added to MediaItemRepository if needed.
-        if (status != null && !status.isEmpty()) {
-            mediaPage = mediaItemRepository.findAll(pageRequest); // Actually should filter by status
-            // For now, let's just use findAll and filter manually or add a repo method
-        } else {
-            mediaPage = mediaItemRepository.findAll(pageRequest);
-        }
+        GetMediaItemsRequest request = GetMediaItemsRequest.newBuilder()
+                .setPage(page)
+                .setLimit(limit)
+                .setStatus(status != null ? status : "")
+                .build();
 
-        List<MediaItem> items = mediaPage.getContent().stream()
-                .filter(m -> status == null || m.getStatus().equalsIgnoreCase(status))
-                .map(this::mapToDto)
+        GetMediaItemsResponse response = mediaItemStub.getMediaItems(request);
+
+        List<MediaItem> items = response.getItemsList().stream()
+                .map(this::mapGrpcToDto)
                 .collect(Collectors.toList());
 
         return PagedResponse.<MediaItem>builder()
                 .page(page)
                 .limit(limit)
-                .totalDocs((int) mediaPage.getTotalElements())
-                .totalPages(mediaPage.getTotalPages())
+                .totalDocs((int) response.getTotalCount())
+                .totalPages(response.getTotalPages())
                 .items(items)
                 .build();
     }
 
     public Optional<MediaItem> getMediaById(UUID id) {
-        return mediaItemRepository.findById(id).map(this::mapToDto);
+        try {
+            MediaItemResponse response = mediaItemStub.getMediaItemById(
+                    GetMediaItemByIdRequest.newBuilder()
+                            .setId(id.toString())
+                            .build()
+            );
+            return Optional.of(mapGrpcToDto(response));
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
+                return Optional.empty();
+            }
+            throw e;
+        }
     }
 
-    @Transactional
     public void createMedia(MediaItemInput input) {
-        MediaItemEntity entity = MediaItemEntity.builder()
-                .title(input.getTitle())
-                .posterUrl(input.getPosterUrl())
-                .status(input.getStatus())
-                .releaseYear(input.getReleaseYear())
+        SaveMediaItemRequest request = SaveMediaItemRequest.newBuilder()
+                .setId(UUID.randomUUID().toString())
+                .setTitle(input.getTitle() != null ? input.getTitle() : "")
+                .setPosterUrl(input.getPosterUrl() != null ? input.getPosterUrl() : "")
+                .setStatus(input.getStatus() != null ? input.getStatus() : "")
+                .setReleaseYear(input.getReleaseYear() != null ? input.getReleaseYear() : 0)
                 .build();
-        mediaItemRepository.save(entity);
+        mediaItemStub.saveMediaItem(request);
     }
 
-    @Transactional
     public void updateMedia(UUID id, MediaItemInput input) {
-        mediaItemRepository.findById(id).ifPresent(m -> {
-            m.setTitle(input.getTitle());
-            m.setPosterUrl(input.getPosterUrl());
-            m.setStatus(input.getStatus());
-            m.setReleaseYear(input.getReleaseYear());
-            mediaItemRepository.save(m);
-        });
+        SaveMediaItemRequest request = SaveMediaItemRequest.newBuilder()
+                .setId(id.toString())
+                .setTitle(input.getTitle() != null ? input.getTitle() : "")
+                .setPosterUrl(input.getPosterUrl() != null ? input.getPosterUrl() : "")
+                .setStatus(input.getStatus() != null ? input.getStatus() : "")
+                .setReleaseYear(input.getReleaseYear() != null ? input.getReleaseYear() : 0)
+                .build();
+        mediaItemStub.saveMediaItem(request);
     }
 
-    private MediaItem mapToDto(MediaItemEntity entity) {
+    private MediaItem mapGrpcToDto(MediaItemResponse entity) {
         return MediaItem.builder()
-                .id(entity.getId())
+                .id(entity.getId().isEmpty() ? null : UUID.fromString(entity.getId()))
                 .title(entity.getTitle())
                 .posterUrl(entity.getPosterUrl())
                 .status(entity.getStatus())

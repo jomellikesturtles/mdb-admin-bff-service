@@ -16,6 +16,7 @@ service TorrentService {
     rpc SaveTorrent (MovieTorrent) returns (MovieTorrent);
     rpc GetTorrent (MovieTorrent) returns (MovieTorrent);
     rpc GetTorrents (GetTorrentsRequest) returns (GetTorrentsResponse);
+    rpc DeleteTorrent (MovieTorrent) returns (MovieTorrent);
 }
 
 message GetTorrentsRequest {

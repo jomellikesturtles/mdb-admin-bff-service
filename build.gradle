@@ -39,6 +39,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springframework.kafka:spring-kafka'
     runtimeOnly 'org.postgresql:postgresql'
     
@@ -55,6 +56,7 @@ dependencies {
 
     // OpenAPI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+    // implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
 
     // JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.12.3'

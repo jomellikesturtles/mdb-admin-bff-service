@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdb.adminbff.dto.PagedResponse;
 import com.mdb.adminbff.dto.MediaSource;
 import com.mdb.adminbff.dto.MediaSourceInput;
-import com.mdb.adminbff.entity.MediaSourceEntity;
-import com.mdb.adminbff.repository.MediaSourceRepository;
 import com.mdb.media_data_gateway_service.grpc.GetTorrentsRequest;
 import com.mdb.media_data_gateway_service.grpc.GetTorrentsResponse;
 import com.mdb.media_data_gateway_service.grpc.MovieTorrent;
@@ -13,10 +11,7 @@ import com.mdb.media_data_gateway_service.grpc.TorrentServiceGrpc;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -28,7 +23,6 @@ import java.util.stream.Collectors;
 public class MediaSourceService {
 
     private static final Logger logger = LoggerFactory.getLogger(MediaSourceService.class);
-    private final MediaSourceRepository mediaSourceRepository;
     private final TorrentServiceGrpc.TorrentServiceBlockingStub mediaSourceStub;
     private final ObjectMapper objectMapper;
 
@@ -64,8 +58,6 @@ public class MediaSourceService {
         } catch (Exception e) {
             logger.error("Critical error mapping gRPC MovieTorrent dataJson to DTO for IMDB ID {}: {}", 
                     grpcTorrent.getImdbId(), e.getMessage());
-            // We return a partially populated object to avoid breaking the entire list, 
-            // but log it as an error. Alternatively, throw an exception here if data integrity is strictly required.
             return MediaSource.builder()
                     .imdbId(grpcTorrent.getImdbId())
                     .name("Data Mapping Error")
@@ -84,17 +76,16 @@ public class MediaSourceService {
             
             MovieTorrent response = mediaSourceStub.getTorrent(request);
             if (response.getDataJson().isEmpty() && response.getImdbId().isEmpty()) {
-                logger.warn("Media source {} not found in gRPC, checking local repository", id);
-                return mediaSourceRepository.findById(id).map(this::mapToDto);
+                logger.warn("Media source {} not found in gRPC", id);
+                return Optional.empty();
             }
             return Optional.ofNullable(mapGrpcToDto(response));
         } catch (Exception e) {
-            logger.error("Error fetching media source {} from gRPC: {}. Falling back to local repository.", id, e.getMessage());
-            return mediaSourceRepository.findById(id).map(this::mapToDto);
+            logger.error("Error fetching media source {} from gRPC: {}", id, e.getMessage());
+            return Optional.empty();
         }
     }
 
-    @Transactional
     public MediaSource addMediaSource(MediaSourceInput input) {
         logger.info("Adding new media source via gRPC: {}", input.getName());
         MediaSource source = MediaSource.builder()
@@ -110,28 +101,9 @@ public class MediaSourceService {
                 .uploadSpeed(0.0)
                 .build();
 
-        try {
-            MovieTorrent request = mapDtoToGrpc(source);
-            MovieTorrent response = mediaSourceStub.saveTorrent(request);
-            return mapGrpcToDto(response);
-        } catch (Exception e) {
-            logger.error("gRPC save failed for media source {}: {}. Falling back to local database.", 
-                    input.getName(), e.getMessage());
-            
-            MediaSourceEntity entity = MediaSourceEntity.builder()
-                    .name(input.getName())
-                    .sourceHash(input.getSourceHash())
-                    .resourceUri(input.getResourceUri())
-                    .size(input.getSize())
-                    .status(input.getStatus() != null ? input.getStatus() : "DOWNLOADING")
-                    .progress(input.getProgress() != null ? input.getProgress() : 0.0)
-                    .downloadSpeed(0.0)
-                    .uploadSpeed(0.0)
-                    .build();
-            
-            MediaSourceEntity saved = mediaSourceRepository.save(entity);
-            return mapToDto(saved);
-        }
+        MovieTorrent request = mapDtoToGrpc(source);
+        MovieTorrent response = mediaSourceStub.saveTorrent(request);
+        return mapGrpcToDto(response);
     }
 
     private MovieTorrent mapDtoToGrpc(MediaSource source) {
@@ -147,7 +119,6 @@ public class MediaSourceService {
         }
     }
 
-    @Transactional
     public Optional<MediaSource> updateMediaSource(UUID id, MediaSourceInput input) {
         logger.info("Updating media source ID via gRPC: {}", id);
         return getMediaSourceById(id).map(source -> {
@@ -163,7 +134,6 @@ public class MediaSourceService {
         });
     }
 
-    @Transactional
     public Optional<MediaSource> patchMediaSource(UUID id, MediaSourceInput input) {
         logger.info("Patching media source ID via gRPC: {}", id);
         return getMediaSourceById(id).map(source -> {
@@ -179,29 +149,17 @@ public class MediaSourceService {
         });
     }
 
-    @Transactional
     public boolean deleteMediaSource(UUID id) {
-        if (mediaSourceRepository.existsById(id)) {
-            mediaSourceRepository.deleteById(id);
-            return true;
+        logger.info("Deleting media source ID via gRPC: {}", id);
+        try {
+            MovieTorrent request = MovieTorrent.newBuilder()
+                    .setImdbId(id.toString())
+                    .build();
+            MovieTorrent response = mediaSourceStub.deleteTorrent(request);
+            return response != null;
+        } catch (Exception e) {
+            logger.error("Error deleting media source {} via gRPC: {}", id, e.getMessage());
+            return false;
         }
-        return false;
-    }
-
-    private MediaSource mapToDto(MediaSourceEntity entity) {
-        return MediaSource.builder()
-                .id(entity.getId())
-                .imdbId(entity.getImdbId())
-                .name(entity.getName())
-                .sourceHash(entity.getSourceHash())
-                .resourceUri(entity.getResourceUri())
-                .size(entity.getSize())
-                .status(entity.getStatus())
-                .downloadSpeed(entity.getDownloadSpeed())
-                .uploadSpeed(entity.getUploadSpeed())
-                .progress(entity.getProgress())
-                .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
     }
 }

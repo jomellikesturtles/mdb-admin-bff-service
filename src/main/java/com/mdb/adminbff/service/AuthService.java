@@ -1,29 +1,34 @@
 package com.mdb.adminbff.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdb.adminbff.dto.*;
-import com.mdb.adminbff.entity.AdminUserEntity;
 import com.mdb.adminbff.exception.ApiErrorCode;
 import com.mdb.adminbff.exception.ApiException;
 import com.mdb.adminbff.exception.BaseApiError;
-import com.mdb.adminbff.repository.AdminUserRepository;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.mdb.user_data_gateway_service.grpc.AdminUserServiceGrpc;
+import com.mdb.user_data_gateway_service.grpc.AdminUserRegisterRequest;
+import com.mdb.user_data_gateway_service.grpc.AdminUserRegisterResponse;
+import com.mdb.user_data_gateway_service.grpc.AdminUserLoginRequest;
+import com.mdb.user_data_gateway_service.grpc.AdminUserResponse;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
-import javax.crypto.SecretKey;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -31,33 +36,37 @@ public class AuthService {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
 
-    private final UserService userService;
-    private final CryptoService cryptoService;
     private final TokenBlacklistService tokenBlacklistService;
-    private final AdminUserRepository adminUserRepository;
-    private final PasswordEncoder passwordEncoder;
+    private final AdminUserServiceGrpc.AdminUserServiceBlockingStub adminUserStub;
+    private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate;
 
-    @Value("${jwt.secret}")
-    private String secret;
+    @Value("${keycloak.token-uri}")
+    private String tokenUri;
 
-    @Value("${jwt.expiration}")
-    private long expiration;
+    @Value("${keycloak.client-id}")
+    private String clientId;
 
-    @Value("${jwt.refresh-expiration}")
-    private long refreshExpiration;
+    @Value("${keycloak.client-secret}")
+    private String clientSecret;
 
     public GenericResponse<LoginResponse> login(LoginRequest request) {
-        logger.info("Attempting admin login for email: {}", request.getEmail());
-        
-        AdminUserEntity admin = adminUserRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> {
-                    logger.warn("Login failed: Email not found: {}", request.getEmail());
-                    return new IllegalArgumentException("Invalid credentials");
-                });
+        logger.info("Attempting admin login via Keycloak proxy for email: {}", request.getEmail());
 
-        if (!passwordEncoder.matches(request.getPassword(), admin.getPassword())) {
-            logger.warn("Login failed: Password mismatch for email: {}", request.getEmail());
-            throw new IllegalArgumentException("Invalid credentials");
+        // 1. Verify via remote AdminUserService that credentials are correct and admin is active
+        AdminUserResponse admin;
+        try {
+            admin = adminUserStub.loginAdmin(AdminUserLoginRequest.newBuilder()
+                    .setUsernameOrEmail(request.getEmail())
+                    .setPassword(request.getPassword())
+                    .build());
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+                logger.warn("Login failed: invalid credentials for email: {}", request.getEmail());
+                throw new IllegalArgumentException("Invalid credentials");
+            }
+            logger.error("Admin login gRPC call failed: {}", e.getMessage());
+            throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "GATEWAY_ERROR", "Failed to authenticate admin user: " + e.getMessage()));
         }
 
         if (!"ACTIVE".equals(admin.getStatus())) {
@@ -65,46 +74,56 @@ public class AuthService {
             throw new IllegalStateException("User account is not active");
         }
 
-        logger.info("Admin login successful for email: {}", request.getEmail());
-        
-        String token = generateToken(admin.getEmail(), admin.getId().toString(), expiration);
-        String refreshToken = generateToken(admin.getEmail(), admin.getId().toString(), refreshExpiration);
+        // 2. Exchange credentials with Keycloak for tokens
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("grant_type", "password");
+        body.add("client_id", clientId);
+        if (clientSecret != null && !clientSecret.isEmpty() && !"client-secret-placeholder".equals(clientSecret)) {
+            body.add("client_secret", clientSecret);
+        }
+        body.add("username", admin.getUsername());
+        body.add("password", request.getPassword());
+        body.add("scope", "openid");
+
+        Map<String, Object> tokenResponse = fetchTokensFromKeycloak(body);
+
+        String token = (String) tokenResponse.get("access_token");
+        String refreshToken = (String) tokenResponse.get("refresh_token");
+        Integer expiresIn = (Integer) tokenResponse.get("expires_in");
+
+        logger.info("Keycloak login successful for email: {}", request.getEmail());
 
         LoginResponse loginResponse = LoginResponse.builder()
                 .token(token)
                 .refreshToken(refreshToken)
-                .expiresIn((int) (expiration / 1000))
+                .expiresIn(expiresIn != null ? expiresIn : 3600)
                 .build();
 
         return GenericResponse.success(loginResponse);
     }
 
-    public AuthResponse register(RegisterRequest request) {
-        logger.info("Attempting legacy registration for username: {}", request.getUsername());
-        // ... (Existing register logic for mdb_user, kept for backward compatibility if needed)
-        if (!request.getPassword().equals(request.getConfirmPassword())) {
-            throw new IllegalArgumentException("Passwords do not match");
-        }
+    public AuthResponse refreshToken(RefreshTokenRequest request) {
+        logger.info("Attempting token refresh via Keycloak proxy");
 
-        if (userService.findByUsername(request.getUsername()).isPresent()) {
-            throw new IllegalArgumentException("Username already exists");
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("grant_type", "refresh_token");
+        body.add("client_id", clientId);
+        if (clientSecret != null && !clientSecret.isEmpty() && !"client-secret-placeholder".equals(clientSecret)) {
+            body.add("client_secret", clientSecret);
         }
+        body.add("refresh_token", request.getRefreshToken());
 
-        User newUser = User.builder()
-                .id(UUID.randomUUID())
-                .keycloakId(UUID.randomUUID().toString())
-                .username(request.getUsername())
-                .email(request.getEmailAddress())
-                .status("ACTIVE")
-                .roles(List.of("ROLE_USER"))
-                .lastLogin(LocalDateTime.now())
+        Map<String, Object> tokenResponse = fetchTokensFromKeycloak(body);
+
+        String token = (String) tokenResponse.get("access_token");
+        String refreshToken = (String) tokenResponse.get("refresh_token");
+
+        return AuthResponse.builder()
+                .token(token)
+                .refreshToken(refreshToken)
                 .build();
-        
-        userService.saveUser(newUser);
-        return generateAuthResponse(newUser);
     }
 
-    @Transactional
     public GenericResponse<Map<String, Object>> registerAdmin(RegisterRequest request) {
         logger.info("Attempting admin registration for email: {}", request.getEmailAddress());
 
@@ -112,88 +131,142 @@ public class AuthService {
         String sanitizedUsername = sanitizeInput(request.getUsername());
         String sanitizedEmail = sanitizeInput(request.getEmailAddress()).toLowerCase();
 
-        // Uniqueness check
-        if (adminUserRepository.findByEmail(sanitizedEmail).isPresent() || 
-            adminUserRepository.findByUsername(sanitizedUsername).isPresent()) {
-            logger.warn("Registration failed: Email or username already exists: {}", sanitizedEmail);
-            throw new ApiException(new BaseApiError(ApiErrorCode.CONFLICT));
+        // 1. Authenticate with Keycloak as Admin Client
+        String adminToken = getAdminAccessToken();
+
+        // 2. Provision User in Keycloak
+        String keycloakUserId = provisionUserInKeycloak(adminToken, sanitizedUsername, sanitizedEmail, request.getPassword());
+
+        // 3. Persist on remote gateway via gRPC with compensation on failure
+        try {
+            AdminUserRegisterResponse regResponse = adminUserStub.registerAdmin(AdminUserRegisterRequest.newBuilder()
+                    .setUsername(sanitizedUsername)
+                    .setEmail(sanitizedEmail)
+                    .setPassword(request.getPassword())
+                    .build());
+
+            if (!regResponse.getSuccess()) {
+                logger.warn("Admin registration failed on gateway: {}", regResponse.getMessage());
+                if (regResponse.getMessage().contains("exists")) {
+                    throw new ApiException(new BaseApiError(ApiErrorCode.CONFLICT));
+                }
+                throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.BAD_REQUEST, "REGISTRATION_FAILED", regResponse.getMessage()));
+            }
+
+            logger.info("Admin registered successfully in gateway: {}", sanitizedEmail);
+
+            Map<String, Object> userData = Map.of(
+                    "id", regResponse.getId(),
+                    "username", sanitizedUsername,
+                    "email", sanitizedEmail
+            );
+
+            return GenericResponse.success("User registered successfully", Map.of(
+                    "user", userData
+            ));
+        } catch (Exception e) {
+            logger.error("Gateway database save failed for registered admin: {}. Executing Keycloak compensation delete...", sanitizedEmail, e);
+            deleteUserInKeycloak(adminToken, keycloakUserId);
+            throw e;
+        }
+    }
+
+    private String getAdminAccessToken() {
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("grant_type", "client_credentials");
+        body.add("client_id", clientId);
+        if (clientSecret != null && !clientSecret.isEmpty() && !"client-secret-placeholder".equals(clientSecret)) {
+            body.add("client_secret", clientSecret);
         }
 
-        // Hashing and Persistence
-        AdminUserEntity admin = AdminUserEntity.builder()
-                .username(sanitizedUsername)
-                .email(sanitizedEmail)
-                .password(passwordEncoder.encode(request.getPassword()))
-                .status("ACTIVE")
-                .build();
-
-        AdminUserEntity saved = adminUserRepository.save(admin);
-        logger.info("Admin registered successfully: {}", saved.getEmail());
-
-        // Token Generation
-        String token = generateToken(saved.getEmail(), saved.getId().toString(), expiration);
-
-        // Response Construction
-        Map<String, Object> userData = Map.of(
-                "id", saved.getId().toString(),
-                "username", saved.getUsername(),
-                "email", saved.getEmail()
-        );
-
-        return GenericResponse.success("User registered successfully", Map.of(
-                "user", userData,
-                "token", token
-        ));
-    }
-
-    private String sanitizeInput(String input) {
-        if (input == null) return null;
-        return input.replaceAll("<[^>]*>", "").trim();
-    }
-
-    public AuthResponse login(AuthRequest request) {
-        logger.info("Attempting legacy login for username: {}", request.getUsername());
-        User user = userService.findByUsername(request.getUsername())
-                .orElseThrow(() -> {
-                    logger.warn("Login failed: Invalid username: {}", request.getUsername());
-                    return new IllegalArgumentException("Invalid username or password");
-                });
-
-        logger.info("Login successful for username: {}", request.getUsername());
-        return generateAuthResponse(user);
-    }
-
-    public AuthResponse refreshToken(RefreshTokenRequest request) {
-        String refreshToken = request.getRefreshToken();
-        SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(body, headers);
 
         try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(refreshToken)
-                    .getPayload();
-
-            String username = claims.getSubject();
-            
-            return adminUserRepository.findByEmail(username)
-                    .map(admin -> {
-                        String newToken = generateToken(admin.getEmail(), admin.getId().toString(), expiration);
-                        String newRefreshToken = generateToken(admin.getEmail(), admin.getId().toString(), refreshExpiration);
-                        return AuthResponse.builder()
-                                .token(newToken)
-                                .refreshToken(newRefreshToken)
-                                .build();
-                    })
-                    .orElseGet(() -> {
-                        User user = userService.findByUsername(username)
-                                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-                        return generateAuthResponse(user);
-                    });
-
+            ResponseEntity<Map> response = this.restTemplate.postForEntity(tokenUri, entity, Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> responseBody = response.getBody();
+            if (responseBody != null && responseBody.containsKey("access_token")) {
+                return (String) responseBody.get("access_token");
+            }
+            throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "KEYCLOAK_AUTH_ERROR", "No access token returned from Keycloak service account"));
         } catch (Exception e) {
-            logger.warn("Invalid refresh token provided");
-            throw new IllegalArgumentException("Invalid refresh token");
+            logger.error("Failed to authenticate BFF admin service account with Keycloak: {}", e.getMessage());
+            if (e instanceof ApiException) {
+                throw (ApiException) e;
+            }
+            throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "KEYCLOAK_AUTH_ERROR", "Failed to authenticate admin service account: " + e.getMessage()));
+        }
+    }
+
+    private String provisionUserInKeycloak(String adminToken, String username, String email, String password) {
+        String serverUrl = tokenUri.substring(0, tokenUri.indexOf("/realms"));
+        String realm = tokenUri.substring(tokenUri.indexOf("/realms/") + 8, tokenUri.indexOf("/protocol/"));
+        String adminUsersUri = serverUrl + "/admin/realms/" + realm + "/users";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        Map<String, Object> credential = Map.of(
+                "type", "password",
+                "value", password,
+                "temporary", false
+        );
+
+        Map<String, Object> userBody = Map.of(
+                "username", username,
+                "email", email,
+                "firstName", username,
+                "lastName", "Admin",
+                "enabled", true,
+                "emailVerified", true,
+                "requiredActions", List.of(),
+                "credentials", List.of(credential)
+        );
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(userBody, headers);
+
+        try {
+            ResponseEntity<Void> response = this.restTemplate.postForEntity(adminUsersUri, entity, Void.class);
+            if (response.getStatusCode().is2xxSuccessful()) {
+                URI location = response.getHeaders().getLocation();
+                if (location != null) {
+                    String path = location.getPath();
+                    return path.substring(path.lastIndexOf('/') + 1);
+                }
+                logger.warn("Keycloak user created but Location header was missing");
+                return null;
+            }
+            throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.valueOf(response.getStatusCode().value()), "KEYCLOAK_CREATE_ERROR", "Unexpected status code from Keycloak user creation: " + response.getStatusCode()));
+        } catch (Exception e) {
+            logger.error("Failed to provision user in Keycloak: {}", e.getMessage());
+            if (e instanceof ApiException) {
+                throw (ApiException) e;
+            }
+            throw new ApiException(new BaseApiError(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "KEYCLOAK_CREATE_ERROR", "Failed to provision user in identity provider: " + e.getMessage()));
+        }
+    }
+
+    private void deleteUserInKeycloak(String adminToken, String keycloakUserId) {
+        if (keycloakUserId == null || keycloakUserId.isEmpty()) {
+            return;
+        }
+
+        String serverUrl = tokenUri.substring(0, tokenUri.indexOf("/realms"));
+        String realm = tokenUri.substring(tokenUri.indexOf("/realms/") + 8, tokenUri.indexOf("/protocol/"));
+        String deleteUserUri = serverUrl + "/admin/realms/" + realm + "/users/" + keycloakUserId;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            this.restTemplate.exchange(deleteUserUri, HttpMethod.DELETE, entity, Void.class);
+            logger.info("Successfully executed Keycloak compensation: deleted user {}", keycloakUserId);
+        } catch (Exception e) {
+            logger.error("Failed to execute Keycloak compensation for user {}: {}", keycloakUserId, e.getMessage());
         }
     }
 
@@ -201,19 +274,20 @@ public class AuthService {
         if (token != null && token.startsWith("Bearer ")) {
             String jwt = token.substring(7);
             try {
-                SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-                Claims claims = Jwts.parser()
-                        .verifyWith(key)
-                        .build()
-                        .parseSignedClaims(jwt)
-                        .getPayload();
-                
-                Date expirationDate = claims.getExpiration();
-                long remainingTime = expirationDate.getTime() - System.currentTimeMillis();
-                
-                if (remainingTime > 0) {
-                    tokenBlacklistService.blacklistToken(jwt, remainingTime);
-                    logger.info("Token blacklisted for logout. Expires in {} ms", remainingTime);
+                String[] parts = jwt.split("\\.");
+                if (parts.length >= 2) {
+                    String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+                    @SuppressWarnings("unchecked")
+                    Map<?, ?> claims = objectMapper.readValue(payloadJson, Map.class);
+                    Number exp = (Number) claims.get("exp");
+                    if (exp != null) {
+                        long expirationTimeMs = exp.longValue() * 1000;
+                        long remainingTime = expirationTimeMs - System.currentTimeMillis();
+                        if (remainingTime > 0) {
+                            tokenBlacklistService.blacklistToken(jwt, remainingTime);
+                            logger.info("Token blacklisted for logout. Expires in {} ms", remainingTime);
+                        }
+                    }
                 }
             } catch (Exception e) {
                 logger.warn("Failed to blacklist token during logout: {}", e.getMessage());
@@ -221,24 +295,24 @@ public class AuthService {
         }
     }
 
-    private AuthResponse generateAuthResponse(User user) {
-        String accessToken = generateToken(user.getUsername(), user.getId().toString(), expiration);
-        String refreshToken = generateToken(user.getUsername(), user.getId().toString(), refreshExpiration);
-        return AuthResponse.builder()
-                .token(accessToken)
-                .refreshToken(refreshToken)
-                .user(user)
-                .build();
+    private Map<String, Object> fetchTokensFromKeycloak(MultiValueMap<String, String> body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(body, headers);
+
+        try {
+            ResponseEntity<Map> response = this.restTemplate.postForEntity(tokenUri, entity, Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> responseBody = response.getBody();
+            return responseBody != null ? responseBody : Collections.emptyMap();
+        } catch (Exception e) {
+            logger.error("Failed to authenticate with Keycloak: {}", e.getMessage());
+            throw new IllegalArgumentException("Invalid credentials", e);
+        }
     }
 
-    private String generateToken(String subject, String userId, long expirationTime) {
-        SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-        return Jwts.builder()
-                .subject(subject)
-                .id(userId)
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + expirationTime))
-                .signWith(key)
-                .compact();
+    private String sanitizeInput(String input) {
+        if (input == null) return null;
+        return input.replaceAll("<[^>]*>", "").trim();
     }
 }

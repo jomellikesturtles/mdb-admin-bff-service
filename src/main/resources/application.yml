@@ -1,5 +1,5 @@
 server:
-  port: 3001
+  port: 5002
   servlet:
     context-path: /api/v1
 
@@ -9,9 +9,20 @@ cors:
 spring:
   application:
     name: mdb-admin-bff-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8484/realms/mdb-realm}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8484/realms/mdb-realm/protocol/openid-connect/certs}
   
   kafka:
-    bootstrap-servers: localhost:9092
+    #    kafka:
+#    bootstrap-servers: localhost:9093
+#      producer:
+#        key-serializer: org.apache.kafka.common.serialization.StringSerializer
+#        value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    bootstrap-servers: localhost:9093
     consumer:
       group-id: mdb-admin-group
       auto-offset-reset: earliest
@@ -21,26 +32,15 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
-  jpa:
-    hibernate:
-      ddl-auto: update
-    show-sql: true
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
-  datasource:
-    # url: jdbc:postgresql://localhost:5433/mdb_prod?currentSchema=public
-    url: jdbc:postgresql://localhost:5433/mdb_prod
-    username: postgres
-    password: postgres
-    driver-class-name: org.postgresql.Driver
-
 grpc:
   client:
     media-gateway:
       host: ${MEDIA_GATEWAY_HOST:localhost}
       port: ${MEDIA_GATEWAY_PORT:9090}
+    user-gateway:
+      host: ${USER_GATEWAY_HOST:localhost}
+      #port: ${USER_GATEWAY_PORT:6001}
+      port: ${USER_GATEWAY_PORT:6005}
 
   data:
     redis:
@@ -93,9 +93,17 @@ jwt:
   expiration: 86400000 # 1 day
   refresh-expiration: 604800000 # 7 days
 
+keycloak:
+  token-uri: ${KEYCLOAK_TOKEN_URI:http://localhost:8484/realms/mdb-realm/protocol/openid-connect/token}
+  client-id: ${KEYCLOAK_CLIENT_ID:mdb-admin-client}
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:BMDvswa0MHpQNnD7yPYL1K0FwIC1kNdF}
+
+
 logging:
   level:
     root: INFO
     com.mdb.adminbff: DEBUG
+    org.apache.kafka: OFF
+    org.springframework.kafka: OFF
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%X{traceId}] %-5level %logger{36} - %msg%n"
