@@ -44,7 +44,7 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
     
     // Resilience4j
-    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.4.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop' // Required for resilience4j annotations
 
     // gRPC
