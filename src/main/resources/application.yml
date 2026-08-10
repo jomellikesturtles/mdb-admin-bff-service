@@ -31,7 +31,10 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-
+  data:
+    redis:
+      host: localhost
+      port: 6380
 grpc:
   client:
     media-gateway:
@@ -42,10 +45,6 @@ grpc:
       #port: ${USER_GATEWAY_PORT:6001}
       port: ${USER_GATEWAY_PORT:6005}
 
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 management:
   endpoints:
